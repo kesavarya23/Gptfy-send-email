@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Salesforce Email Sender</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            font-size: 16px;
+            opacity: 0.9;
+        }
+
+        .form-container {
+            padding: 40px;
+        }
+
+        .form-section {
+            margin-bottom: 30px;
+        }
+
+        .form-section h2 {
+            color: #667eea;
+            font-size: 20px;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .required {
+            color: red;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .results {
+            display: none;
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .results.show {
+            display: block;
+        }
+
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .summary-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .summary-card h3 {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .summary-card p {
+            font-size: 32px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .email-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .email-item {
+            background: white;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .email-info {
+            flex: 1;
+        }
+
+        .email-type {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-right: 10px;
+        }
+
+        .type-opportunity {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .type-case {
+            background: #fce4ec;
+            color: #c2185b;
+        }
+
+        .email-status {
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-sent {
+            background: #c8e6c9;
+            color: #2e7d32;
+        }
+
+        .status-failed {
+            background: #ffcdd2;
+            color: #c62828;
+        }
+
+        .error-message {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .error-message.show {
+            display: block;
+        }
+
+        .success-message {
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+        }
+
+        .info-box {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #1976d2;
+        }
+
+        .info-box p {
+            color: #1565c0;
+            font-size: 14px;
+            margin: 5px 0;
+        }
+
+        @media (max-width: 768px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+
+            .summary {
+                grid-template-columns: 1fr;
+            }
+
+            .header h1 {
+                font-size: 24px;
+            }
+
+            .form-container {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Salesforce Email Sender</h1>
+            <p>Generate and send professional Salesforce emails automatically</p>
+        </div>
+
+        <div class="form-container">
+            <div class="info-box">
+                <p><strong>📧 Gmail Users:</strong> Use App Password, not regular password</p>
+                <p><strong>🔗 Get App Password:</strong> <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a></p>
+            </div>
+
+            <form id="emailForm">
+                <!-- Sender Information -->
+                <div class="form-section">
+                    <h2>📤 Sender Information</h2>
+                    <div class="form-group">
+                        <label>Sender Email <span class="required">*</span></label>
+                        <input type="email" id="sender_email" required placeholder="your-email@gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Sender Password (App Password) <span class="required">*</span></label>
+                        <input type="password" id="sender_password" required placeholder="Enter Gmail App Password">
+                    </div>
+                    <div class="form-group">
+                        <label>Sender Name</label>
+                        <input type="text" id="sender_name" placeholder="Your Name or Company Name">
+                    </div>
+                </div>
+
+                <!-- Recipient Information -->
+                <div class="form-section">
+                    <h2>📥 Recipient Information</h2>
+                    <div class="form-group">
+                        <label>Recipient Email <span class="required">*</span></label>
+                        <input type="email" id="recipient_email" required placeholder="recipient@example.com">
+                    </div>
+                </div>
+
+                <!-- Email Configuration -->
+                <div class="form-section">
+                    <h2>⚙️ Email Configuration</h2>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Opportunity Emails</label>
+                            <input type="number" id="num_opportunities" min="0" value="0" placeholder="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Case Emails</label>
+                            <input type="number" id="num_cases" min="0" value="0" placeholder="0">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Custom Message (Optional)</label>
+                        <textarea id="custom_message" placeholder="Enter a custom message for the emails..."></textarea>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn" id="submitBtn">
+                    🚀 Send Emails
+                </button>
+            </form>
+
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Generating and sending emails...</p>
+            </div>
+
+            <div class="error-message" id="errorMessage"></div>
+            <div class="success-message" id="successMessage"></div>
+
+            <div class="results" id="results">
+                <h2 style="margin-bottom: 20px; color: #667eea;">📊 Results</h2>
+
+                <div class="summary" id="summary">
+                    <div class="summary-card">
+                        <h3>Total Sent</h3>
+                        <p id="totalSent">0</p>
+                    </div>
+                    <div class="summary-card">
+                        <h3>Failed</h3>
+                        <p id="totalFailed" style="color: #c62828;">0</p>
+                    </div>
+                    <div class="summary-card">
+                        <h3>Success Rate</h3>
+                        <p id="successRate">0%</p>
+                    </div>
+                </div>
+
+                <div class="email-list" id="emailList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('emailForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            // Hide previous results
+            document.getElementById('results').classList.remove('show');
+            document.getElementById('errorMessage').classList.remove('show');
+            document.getElementById('successMessage').classList.remove('show');
+
+            // Show loading
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('submitBtn').disabled = true;
+
+            // Get form data
+            const formData = {
+                sender_email: document.getElementById('sender_email').value,
+                sender_password: document.getElementById('sender_password').value,
+                sender_name: document.getElementById('sender_name').value,
+                recipient_email: document.getElementById('recipient_email').value,
+                num_opportunities: parseInt(document.getElementById('num_opportunities').value) || 0,
+                num_cases: parseInt(document.getElementById('num_cases').value) || 0,
+                custom_message: document.getElementById('custom_message').value
+            };
+
+            try {
+                const response = await fetch('/send_emails', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                const result = await response.json();
+
+                // Hide loading
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('submitBtn').disabled = false;
+
+                if (result.success) {
+                    // Show success message
+                    document.getElementById('successMessage').textContent =
+                        `✓ Successfully sent ${result.summary.sent} out of ${result.summary.total} emails!`;
+                    document.getElementById('successMessage').classList.add('show');
+
+                    // Show results
+                    document.getElementById('totalSent').textContent = result.summary.sent;
+                    document.getElementById('totalFailed').textContent = result.summary.failed;
+                    document.getElementById('successRate').textContent = result.summary.success_rate + '%';
+
+                    // Show email list
+                    const emailList = document.getElementById('emailList');
+                    emailList.innerHTML = '';
+
+                    result.emails.forEach(email => {
+                        const item = document.createElement('div');
+                        item.className = 'email-item';
+                        item.innerHTML = `
+                            <div class="email-info">
+                                <span class="email-type type-${email.type.toLowerCase()}">${email.type}</span>
+                                <strong>${email.name}</strong>
+                            </div>
+                            <span class="email-status status-${email.status.toLowerCase()}">${email.status}</span>
+                        `;
+                        emailList.appendChild(item);
+                    });
+
+                    document.getElementById('results').classList.add('show');
+
+                } else {
+                    // Show error
+                    document.getElementById('errorMessage').textContent =
+                        `✗ Error: ${result.error}`;
+                    document.getElementById('errorMessage').classList.add('show');
+                }
+
+            } catch (error) {
+                // Hide loading
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('submitBtn').disabled = false;
+
+                // Show error
+                document.getElementById('errorMessage').textContent =
+                    `✗ Error: ${error.message}`;
+                document.getElementById('errorMessage').classList.add('show');
+            }
+        });
+    </script>
+</body>
+</html>

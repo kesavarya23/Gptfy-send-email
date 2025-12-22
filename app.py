@@ -1,0 +1,167 @@
+"""
+Salesforce Email Sender - Web UI
+Simple web interface for sending emails
+"""
+
+from flask import Flask, render_template, request, jsonify, session
+from flask_cors import CORS
+import sys
+import secrets
+import os
+sys.path.append('src')
+
+from agent import EmailAgent
+from utils.data_generator import DataGenerator
+from utils.email_generator import EmailGenerator
+
+app = Flask(__name__)
+app.secret_key = secrets.token_hex(16)
+CORS(app)  # Enable CORS for all routes
+
+
+@app.route('/')
+def index():
+    """Main page"""
+    return render_template('index.html')
+
+
+@app.route('/send_emails', methods=['POST'])
+def send_emails():
+    """Send emails endpoint"""
+    try:
+        # Get form data
+        data = request.json
+
+        sender_email = data.get('sender_email')
+        sender_password = data.get('sender_password')
+        sender_name = data.get('sender_name', sender_email)
+        recipient_email = data.get('recipient_email')
+        num_opportunities = int(data.get('num_opportunities', 0))
+        num_cases = int(data.get('num_cases', 0))
+        custom_message = data.get('custom_message', 'Please review this Salesforce data.')
+
+        # Validation
+        if not sender_email or not sender_password or not recipient_email:
+            return jsonify({
+                'success': False,
+                'error': 'Please fill in all required fields'
+            })
+
+        if num_opportunities == 0 and num_cases == 0:
+            return jsonify({
+                'success': False,
+                'error': 'Please specify at least 1 opportunity or case email'
+            })
+
+        # Initialize services
+        data_generator = DataGenerator()
+        agent = EmailAgent(
+            sender_email=sender_email,
+            sender_password=sender_password,
+            sender_name=sender_name
+        )
+        email_generator = EmailGenerator()
+
+        results = []
+        all_emails = []
+
+        # Generate and send opportunities
+        if num_opportunities > 0:
+            opportunities = data_generator.generate_opportunities(num_opportunities)
+
+            for i, opp in enumerate(opportunities, 1):
+                try:
+                    email_content = email_generator.generate_opportunity_email(
+                        opportunity_data=opp,
+                        custom_message=custom_message
+                    )
+
+                    success = agent.email_service.send_email(
+                        to_email=recipient_email,
+                        subject=email_content['subject'],
+                        html_content=email_content['html_content']
+                    )
+
+                    all_emails.append({
+                        'type': 'Opportunity',
+                        'name': opp['opportunity_name'],
+                        'status': 'Sent' if success else 'Failed',
+                        'number': i
+                    })
+
+                except Exception as e:
+                    all_emails.append({
+                        'type': 'Opportunity',
+                        'name': opp.get('opportunity_name', 'Unknown'),
+                        'status': 'Failed',
+                        'error': str(e),
+                        'number': i
+                    })
+
+        # Generate and send cases
+        if num_cases > 0:
+            cases = data_generator.generate_cases(num_cases)
+
+            for i, case in enumerate(cases, 1):
+                try:
+                    email_content = email_generator.generate_case_email(
+                        case_data=case,
+                        custom_message=custom_message
+                    )
+
+                    success = agent.email_service.send_email(
+                        to_email=recipient_email,
+                        subject=email_content['subject'],
+                        html_content=email_content['html_content']
+                    )
+
+                    all_emails.append({
+                        'type': 'Case',
+                        'name': f"Case {case['case_number']}",
+                        'status': 'Sent' if success else 'Failed',
+                        'number': i
+                    })
+
+                except Exception as e:
+                    all_emails.append({
+                        'type': 'Case',
+                        'name': f"Case {case.get('case_number', 'Unknown')}",
+                        'status': 'Failed',
+                        'error': str(e),
+                        'number': i
+                    })
+
+        # Calculate summary
+        total_sent = sum(1 for email in all_emails if email['status'] == 'Sent')
+        total_failed = len(all_emails) - total_sent
+
+        return jsonify({
+            'success': True,
+            'summary': {
+                'total': len(all_emails),
+                'sent': total_sent,
+                'failed': total_failed,
+                'success_rate': round((total_sent / len(all_emails) * 100), 1) if all_emails else 0
+            },
+            'emails': all_emails
+        })
+
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+
+if __name__ == '__main__':
+    print("="*70)
+    print("SALESFORCE EMAIL SENDER - WEB UI")
+    print("="*70)
+    print()
+    print("Starting web server...")
+    print("Open your browser and go to: http://localhost:5000")
+    print()
+    print("Press Ctrl+C to stop the server")
+    print("="*70)
+
+    app.run(debug=True, host='0.0.0.0', port=5000)
