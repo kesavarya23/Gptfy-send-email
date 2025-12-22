@@ -160,6 +160,54 @@ class EmailGenerator:
             logger.error(f"Error generating custom email: {str(e)}")
             raise
 
+    def generate_business_email(self, business_data: Dict) -> Dict[str, str]:
+        """
+        Generate business email based on type
+
+        Args:
+            business_data: Dictionary with business email data including 'type' field
+
+        Returns:
+            Dictionary with 'subject' and 'html_content'
+        """
+        try:
+            email_type = business_data.get('type')
+
+            # Map type to template
+            template_map = {
+                'meeting_invitation': 'meeting_invitation.html',
+                'followup': 'followup.html',
+                'thank_you': 'thank_you.html',
+                'project_update': 'project_update.html',
+                'reminder': 'reminder.html'
+            }
+
+            template_name = template_map.get(email_type)
+            if not template_name:
+                raise ValueError(f"Unknown business email type: {email_type}")
+
+            template = self.env.get_template(template_name)
+
+            # Add generated date
+            template_data = business_data.copy()
+            template_data['generated_date'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+            html_content = template.render(**template_data)
+
+            # Get subject from business_data
+            subject = business_data.get('subject', 'Business Email')
+
+            logger.info(f"Generated {email_type} email")
+
+            return {
+                'subject': subject,
+                'html_content': html_content
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating business email: {str(e)}")
+            raise
+
     def preview_email(self, email_data: Dict[str, str]) -> None:
         """
         Print email preview to console

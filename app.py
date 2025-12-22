@@ -38,6 +38,7 @@ def send_emails():
         recipient_email = data.get('recipient_email')
         num_opportunities = int(data.get('num_opportunities', 0))
         num_cases = int(data.get('num_cases', 0))
+        num_business = int(data.get('num_business', 0))
         custom_message = data.get('custom_message', 'Please review this Salesforce data.')
 
         # Validation
@@ -47,10 +48,10 @@ def send_emails():
                 'error': 'Please fill in all required fields'
             })
 
-        if num_opportunities == 0 and num_cases == 0:
+        if num_opportunities == 0 and num_cases == 0 and num_business == 0:
             return jsonify({
                 'success': False,
-                'error': 'Please specify at least 1 opportunity or case email'
+                'error': 'Please specify at least 1 opportunity, case, or business email'
             })
 
         # Initialize services
@@ -126,6 +127,45 @@ def send_emails():
                     all_emails.append({
                         'type': 'Case',
                         'name': f"Case {case.get('case_number', 'Unknown')}",
+                        'status': 'Failed',
+                        'error': str(e),
+                        'number': i
+                    })
+
+        # Generate and send business emails
+        if num_business > 0:
+            business_emails = data_generator.generate_business_emails(num_business)
+
+            for i, business_email in enumerate(business_emails, 1):
+                try:
+                    email_content = email_generator.generate_business_email(business_email)
+
+                    success = agent.email_service.send_email(
+                        to_email=recipient_email,
+                        subject=email_content['subject'],
+                        html_content=email_content['html_content']
+                    )
+
+                    # Friendly type names
+                    type_names = {
+                        'meeting_invitation': 'Meeting Invitation',
+                        'followup': 'Follow-up',
+                        'thank_you': 'Thank You',
+                        'project_update': 'Project Update',
+                        'reminder': 'Reminder'
+                    }
+
+                    all_emails.append({
+                        'type': type_names.get(business_email['type'], business_email['type']),
+                        'name': email_content['subject'],
+                        'status': 'Sent' if success else 'Failed',
+                        'number': i
+                    })
+
+                except Exception as e:
+                    all_emails.append({
+                        'type': 'Business Email',
+                        'name': business_email.get('subject', 'Unknown'),
                         'status': 'Failed',
                         'error': str(e),
                         'number': i

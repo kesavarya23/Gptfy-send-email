@@ -231,6 +231,31 @@
             color: #c2185b;
         }
 
+        .type-meeting {
+            background: #c8e6c9;
+            color: #2e7d32;
+        }
+
+        .type-followup {
+            background: #bbdefb;
+            color: #1565c0;
+        }
+
+        .type-thankyou {
+            background: #ffe0b2;
+            color: #e65100;
+        }
+
+        .type-project {
+            background: #e1bee7;
+            color: #6a1b9a;
+        }
+
+        .type-reminder {
+            background: #ffcdd2;
+            color: #c62828;
+        }
+
         .email-status {
             padding: 6px 16px;
             border-radius: 20px;
@@ -361,6 +386,13 @@
                         </div>
                     </div>
                     <div class="form-group">
+                        <label>Business Emails</label>
+                        <input type="number" id="num_business" min="0" value="0" placeholder="0">
+                        <small style="color: #666; font-size: 12px; display: block; margin-top: 5px;">
+                            ℹ️ Auto-distributes evenly: Meeting Invitations, Follow-ups, Thank You, Project Updates, Reminders
+                        </small>
+                    </div>
+                    <div class="form-group">
                         <label>Custom Message (Optional)</label>
                         <textarea id="custom_message" placeholder="Enter a custom message for the emails..."></textarea>
                     </div>
@@ -423,6 +455,7 @@
                 recipient_email: document.getElementById('recipient_email').value,
                 num_opportunities: parseInt(document.getElementById('num_opportunities').value) || 0,
                 num_cases: parseInt(document.getElementById('num_cases').value) || 0,
+                num_business: parseInt(document.getElementById('num_business').value) || 0,
                 custom_message: document.getElementById('custom_message').value
             };
 
@@ -459,15 +492,32 @@
                     result.emails.forEach(email => {
                         const item = document.createElement('div');
                         item.className = 'email-item';
+
+                        // Map email type to CSS class
+                        const typeClass = getTypeClass(email.type);
+
                         item.innerHTML = `
                             <div class="email-info">
-                                <span class="email-type type-${email.type.toLowerCase()}">${email.type}</span>
+                                <span class="email-type ${typeClass}">${email.type}</span>
                                 <strong>${email.name}</strong>
                             </div>
                             <span class="email-status status-${email.status.toLowerCase()}">${email.status}</span>
                         `;
                         emailList.appendChild(item);
                     });
+
+                    function getTypeClass(type) {
+                        const typeMap = {
+                            'Opportunity': 'type-opportunity',
+                            'Case': 'type-case',
+                            'Meeting Invitation': 'type-meeting',
+                            'Follow-up': 'type-followup',
+                            'Thank You': 'type-thankyou',
+                            'Project Update': 'type-project',
+                            'Reminder': 'type-reminder'
+                        };
+                        return typeMap[type] || 'type-opportunity';
+                    }
 
                     document.getElementById('results').classList.add('show');
 

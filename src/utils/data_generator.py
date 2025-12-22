@@ -55,6 +55,53 @@ class DataGenerator:
 
     ORIGINS = ["Web", "Email", "Phone", "Chat", "Social Media"]
 
+    # Business Email Data
+    MEETING_SUBJECTS = [
+        "Quarterly Business Review", "Project Kickoff Meeting", "Sprint Planning Session",
+        "Budget Review Meeting", "Strategy Discussion", "Product Roadmap Review",
+        "Team Sync", "Client Check-in", "Executive Briefing", "Technical Deep Dive"
+    ]
+
+    FOLLOWUP_CONTEXTS = [
+        "our last conversation about the project timeline",
+        "the demo we conducted last week",
+        "your inquiry about our services",
+        "the proposal we sent",
+        "our discussion regarding pricing",
+        "the technical requirements you shared",
+        "the meeting we had yesterday",
+        "your questions about implementation"
+    ]
+
+    THANKYOU_REASONS = [
+        "attending our product demonstration",
+        "choosing our services for your project",
+        "your partnership and continued trust",
+        "taking the time to meet with our team",
+        "your valuable feedback on our proposal",
+        "participating in our webinar",
+        "your recent purchase",
+        "referring us to your colleagues"
+    ]
+
+    PROJECT_MILESTONES = [
+        "Phase 1 Discovery Completed", "Design Review Finished", "Development Sprint 2 Complete",
+        "User Acceptance Testing Started", "Go-Live Preparation", "System Integration Complete",
+        "Data Migration Finished", "Training Materials Ready", "Performance Testing Done",
+        "Security Audit Passed"
+    ]
+
+    REMINDER_TYPES = [
+        "upcoming deadline for project deliverables",
+        "scheduled maintenance window this weekend",
+        "contract renewal coming up next month",
+        "required training session next week",
+        "pending approval on the proposal",
+        "outstanding invoice payment",
+        "security compliance certification expiring",
+        "quarterly report submission due"
+    ]
+
     CONTACT_FIRST_NAMES = [
         "John", "Jane", "Michael", "Sarah", "David", "Emily", "Robert", "Lisa",
         "James", "Mary", "William", "Patricia", "Richard", "Jennifer", "Thomas", "Linda"
@@ -227,3 +274,165 @@ class DataGenerator:
             "Escalated to engineering team. Custom solution developed and implemented."
         ]
         return random.choice(resolutions)
+
+    def generate_business_emails(self, count: int) -> List[Dict]:
+        """
+        Generate random business emails distributed across 5 types
+        Types: Meeting Invitation, Follow-up, Thank You, Project Update, Reminder
+
+        Args:
+            count: Total number of business emails to generate
+
+        Returns:
+            List of business email dictionaries with 'type' and 'data' keys
+        """
+        emails = []
+
+        # Define email types
+        email_types = [
+            'meeting_invitation',
+            'followup',
+            'thank_you',
+            'project_update',
+            'reminder'
+        ]
+
+        # Distribute count evenly across types
+        per_type = count // 5
+        remainder = count % 5
+
+        # Generate emails for each type
+        for idx, email_type in enumerate(email_types):
+            # Add one extra email to first types if there's remainder
+            type_count = per_type + (1 if idx < remainder else 0)
+
+            for _ in range(type_count):
+                if email_type == 'meeting_invitation':
+                    emails.append(self._generate_meeting_invitation())
+                elif email_type == 'followup':
+                    emails.append(self._generate_followup())
+                elif email_type == 'thank_you':
+                    emails.append(self._generate_thank_you())
+                elif email_type == 'project_update':
+                    emails.append(self._generate_project_update())
+                elif email_type == 'reminder':
+                    emails.append(self._generate_reminder())
+
+        # Shuffle to mix types
+        random.shuffle(emails)
+
+        return emails
+
+    def _generate_meeting_invitation(self) -> Dict:
+        """Generate a meeting invitation email"""
+        subject = random.choice(self.MEETING_SUBJECTS)
+        date = self._random_future_date(days_range=14)
+        time_slot = random.choice([
+            "9:00 AM - 10:00 AM",
+            "10:30 AM - 11:30 AM",
+            "2:00 PM - 3:00 PM",
+            "3:30 PM - 4:30 PM"
+        ])
+        location = random.choice([
+            "Conference Room A",
+            "Virtual (Teams)",
+            "Virtual (Zoom)",
+            "Office Building, Floor 3",
+            "Client Site"
+        ])
+
+        return {
+            'type': 'meeting_invitation',
+            'subject': f"Invitation: {subject}",
+            'meeting_title': subject,
+            'date': date,
+            'time': time_slot,
+            'location': location,
+            'organizer': self._random_name(),
+            'agenda': self._generate_meeting_agenda()
+        }
+
+    def _generate_followup(self) -> Dict:
+        """Generate a follow-up email"""
+        context = random.choice(self.FOLLOWUP_CONTEXTS)
+
+        return {
+            'type': 'followup',
+            'subject': f"Following up on {context.split(' ', 1)[1] if ' ' in context else 'our discussion'}",
+            'context': context,
+            'sender': self._random_name(),
+            'action_items': self._generate_action_items(),
+            'next_steps': self._generate_next_steps()
+        }
+
+    def _generate_thank_you(self) -> Dict:
+        """Generate a thank you email"""
+        reason = random.choice(self.THANKYOU_REASONS)
+
+        return {
+            'type': 'thank_you',
+            'subject': f"Thank you for {reason.split(' ', 1)[1] if ' ' in reason else reason}",
+            'reason': reason,
+            'sender': self._random_name(),
+            'company': random.choice(self.COMPANY_NAMES),
+            'additional_note': self._generate_thank_you_note()
+        }
+
+    def _generate_project_update(self) -> Dict:
+        """Generate a project update email"""
+        milestone = random.choice(self.PROJECT_MILESTONES)
+        project_name = f"{random.choice(self.OPPORTUNITY_TYPES)} Project"
+
+        return {
+            'type': 'project_update',
+            'subject': f"Project Update: {milestone}",
+            'project_name': project_name,
+            'milestone': milestone,
+            'completion': random.choice([60, 70, 75, 80, 85, 90]),
+            'next_milestone': random.choice(self.PROJECT_MILESTONES),
+            'manager': self._random_name(),
+            'status': random.choice(["On Track", "Ahead of Schedule", "Needs Attention"])
+        }
+
+    def _generate_reminder(self) -> Dict:
+        """Generate a reminder email"""
+        reminder_type = random.choice(self.REMINDER_TYPES)
+
+        return {
+            'type': 'reminder',
+            'subject': f"Reminder: {reminder_type.split(' ', 2)[-1] if len(reminder_type.split(' ')) > 2 else reminder_type}",
+            'reminder_about': reminder_type,
+            'due_date': self._random_future_date(days_range=7),
+            'priority': random.choice(["Normal", "High", "Urgent"]),
+            'sender': self._random_name()
+        }
+
+    def _generate_meeting_agenda(self) -> str:
+        """Generate meeting agenda"""
+        agendas = [
+            "Review current project status\nDiscuss upcoming milestones\nAddress open issues\nQ&A session",
+            "Quarterly results presentation\nFuture strategy discussion\nBudget review\nTeam feedback",
+            "Sprint retrospective\nNext sprint planning\nResource allocation\nTechnical challenges",
+            "Client requirements review\nProposal discussion\nTimeline and deliverables\nNext steps"
+        ]
+        return random.choice(agendas)
+
+    def _generate_action_items(self) -> str:
+        """Generate action items for follow-up"""
+        items = [
+            "Review the updated proposal\nProvide feedback by end of week\nSchedule next meeting",
+            "Complete the requirements document\nShare with stakeholders\nConfirm budget approval",
+            "Test the new features\nReport any issues\nApprove for production",
+            "Review contract terms\nObtain legal approval\nSchedule signing meeting"
+        ]
+        return random.choice(items)
+
+    def _generate_thank_you_note(self) -> str:
+        """Generate additional thank you note"""
+        notes = [
+            "We truly appreciate your trust in our team and look forward to continuing our partnership.",
+            "Your support means a lot to us. We're committed to delivering exceptional results.",
+            "It was a pleasure working with you. We hope to collaborate again in the future.",
+            "We value your business and are grateful for the opportunity to serve you."
+        ]
+        return random.choice(notes)
