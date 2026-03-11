@@ -6,6 +6,7 @@ Autonomous agent for generating and sending multiple emails
 import logging
 from typing import List, Dict, Optional
 from datetime import datetime
+import time
 
 from config import Config
 from services.email_service import EmailService
@@ -162,11 +163,12 @@ class EmailAgent:
                     custom_message=custom_message
                 )
 
-                # Send email
+                # Send email with both HTML and plain text
                 success = self.email_service.send_email(
                     to_email=recipient_email,
                     subject=email_content['subject'],
-                    html_content=email_content['html_content']
+                    html_content=email_content['html_content'],
+                    plain_text=email_content.get('plain_text')
                 )
 
                 self.stats['total_processed'] += 1
@@ -182,6 +184,9 @@ class EmailAgent:
                         'reason': 'Failed to send'
                     })
                     logger.error(f"✗ Failed: {email_content['subject']}")
+
+                # Delay between emails
+                time.sleep(30)
 
             except Exception as e:
                 self.stats['total_processed'] += 1
@@ -248,11 +253,12 @@ class EmailAgent:
                     custom_message=custom_message
                 )
 
-                # Send email
+                # Send email with both HTML and plain text
                 success = self.email_service.send_email(
                     to_email=recipient_email,
                     subject=email_content['subject'],
-                    html_content=email_content['html_content']
+                    html_content=email_content['html_content'],
+                    plain_text=email_content.get('plain_text')
                 )
 
                 self.stats['total_processed'] += 1
@@ -268,6 +274,9 @@ class EmailAgent:
                         'reason': 'Failed to send'
                     })
                     logger.error(f"✗ Failed: {email_content['subject']}")
+
+                # Delay between emails
+                time.sleep(30)
 
             except Exception as e:
                 self.stats['total_processed'] += 1
@@ -345,11 +354,12 @@ class EmailAgent:
                             custom_message=custom_message
                         )
 
-                    # Send email
+                    # Send email with both HTML and plain text
                     success = self.email_service.send_email(
                         to_email=recipient,
                         subject=email_content['subject'],
-                        html_content=email_content['html_content']
+                        html_content=email_content['html_content'],
+                        plain_text=email_content.get('plain_text')
                     )
 
                     self.stats['total_processed'] += 1
@@ -366,6 +376,9 @@ class EmailAgent:
                             'reason': 'Failed to send'
                         })
                         logger.error(f"✗ [{i}/{len(data)}] Failed to send to {recipient}")
+
+                    # Delay between emails
+                    time.sleep(30)
 
                 except Exception as e:
                     self.stats['total_processed'] += 1

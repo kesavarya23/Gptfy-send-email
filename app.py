@@ -8,6 +8,7 @@ from flask_cors import CORS
 import sys
 import secrets
 import os
+import time
 sys.path.append('src')
 
 from agent import EmailAgent
@@ -80,7 +81,8 @@ def send_emails():
                     success = agent.email_service.send_email(
                         to_email=recipient_email,
                         subject=email_content['subject'],
-                        html_content=email_content['html_content']
+                        html_content=email_content['html_content'],
+                        plain_text=email_content.get('plain_text')
                     )
 
                     all_emails.append({
@@ -99,6 +101,9 @@ def send_emails():
                         'number': i
                     })
 
+                # Delay between emails
+                time.sleep(30)
+
         # Generate and send cases
         if num_cases > 0:
             cases = data_generator.generate_cases(num_cases)
@@ -113,7 +118,8 @@ def send_emails():
                     success = agent.email_service.send_email(
                         to_email=recipient_email,
                         subject=email_content['subject'],
-                        html_content=email_content['html_content']
+                        html_content=email_content['html_content'],
+                        plain_text=email_content.get('plain_text')
                     )
 
                     all_emails.append({
@@ -132,6 +138,9 @@ def send_emails():
                         'number': i
                     })
 
+                # Delay between emails
+                time.sleep(30)
+
         # Generate and send business emails
         if num_business > 0:
             business_emails = data_generator.generate_business_emails(num_business)
@@ -143,7 +152,8 @@ def send_emails():
                     success = agent.email_service.send_email(
                         to_email=recipient_email,
                         subject=email_content['subject'],
-                        html_content=email_content['html_content']
+                        html_content=email_content['html_content'],
+                        plain_text=email_content.get('plain_text')
                     )
 
                     # Friendly type names
@@ -170,6 +180,9 @@ def send_emails():
                         'error': str(e),
                         'number': i
                     })
+
+                # Delay between emails
+                time.sleep(30)
 
         # Calculate summary
         total_sent = sum(1 for email in all_emails if email['status'] == 'Sent')

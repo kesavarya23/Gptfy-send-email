@@ -72,9 +72,30 @@ class EmailGenerator:
 
             logger.info(f"Generated opportunity email for: {opp_name}")
 
+            # Build plain-text version using key fields
+            lines = [
+                f"{subject}",
+                "",
+                f"Opportunity Name: {template_data.get('opportunity_name', 'N/A')}",
+                f"Account Name: {template_data.get('account_name', 'N/A')}",
+                f"Stage: {template_data.get('stage_name', 'N/A')}",
+                f"Amount: {template_data.get('amount', 'N/A')}",
+                f"Close Date: {template_data.get('close_date', 'N/A')}",
+                f"Owner: {template_data.get('owner_name', 'N/A')}",
+            ]
+            if custom_message:
+                lines.extend(["", f"Message: {custom_message}"])
+            lines.extend([
+                "",
+                f"Generated at: {template_data.get('generated_date')}"
+            ])
+
+            plain_text = "\n".join(lines)
+
             return {
                 'subject': subject,
-                'html_content': html_content
+                'html_content': html_content,
+                'plain_text': plain_text
             }
 
         except Exception as e:
@@ -116,9 +137,30 @@ class EmailGenerator:
 
             logger.info(f"Generated case email for: {case_number}")
 
+            # Build plain-text version using key fields
+            lines = [
+                f"{subject}",
+                "",
+                f"Case Number: {template_data.get('case_number', 'N/A')}",
+                f"Subject: {template_data.get('subject', 'N/A')}",
+                f"Status: {template_data.get('status', 'N/A')}",
+                f"Priority: {template_data.get('priority', 'N/A')}",
+                f"Contact: {template_data.get('contact_name', 'N/A')}",
+                f"Owner: {template_data.get('owner_name', 'N/A')}",
+            ]
+            if custom_message:
+                lines.extend(["", f"Message: {custom_message}"])
+            lines.extend([
+                "",
+                f"Generated at: {template_data.get('generated_date')}"
+            ])
+
+            plain_text = "\n".join(lines)
+
             return {
                 'subject': subject,
-                'html_content': html_content
+                'html_content': html_content,
+                'plain_text': plain_text
             }
 
         except Exception as e:
@@ -199,9 +241,38 @@ class EmailGenerator:
 
             logger.info(f"Generated {email_type} email")
 
+            # Build plain-text version using common business fields
+            lines = [
+                f"{subject}",
+                "",
+                f"Type: {email_type}",
+            ]
+
+            # Optional common fields
+            if 'recipient_name' in template_data:
+                lines.append(f"To: {template_data['recipient_name']}")
+            if 'sender_name' in template_data:
+                lines.append(f"From: {template_data['sender_name']}")
+            if 'project_name' in template_data:
+                lines.append(f"Project: {template_data['project_name']}")
+            if 'meeting_date' in template_data:
+                lines.append(f"Meeting Date: {template_data['meeting_date']}")
+            if 'due_date' in template_data:
+                lines.append(f"Due Date: {template_data['due_date']}")
+            if 'custom_message' in template_data:
+                lines.extend(["", f"Message: {template_data['custom_message']}"])
+
+            lines.extend([
+                "",
+                f"Generated at: {template_data.get('generated_date')}"
+            ])
+
+            plain_text = "\n".join(lines)
+
             return {
                 'subject': subject,
-                'html_content': html_content
+                'html_content': html_content,
+                'plain_text': plain_text
             }
 
         except Exception as e:
