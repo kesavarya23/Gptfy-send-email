@@ -102,6 +102,44 @@ class DataGenerator:
         "quarterly report submission due"
     ]
 
+    # Workspace / Auto-Sync policy scenarios for richer, story-like emails
+    WORKSPACE_POLICY_STORIES = [
+        (
+            "Over the last 24 hours the Workspace Auto-Sync job picked up a new batch of emails "
+            "for the 'Sales Operations' site. After applying the exclusion rules "
+            "(domains: gmail.com, yahoo.com; labels: Personal, Social), the remaining messages "
+            "went through the three-step policy:\n\n"
+            "1) Relevance Screening – the AI marked only the implementation-related conversations as isRelevant=true.\n"
+            "2) Record Matching – messages that mentioned specific Opportunity and Case numbers were matched and had their RelatedToId set.\n"
+            "3) Content Filtering – EmailSummary kept only the project details and removed signatures, marketing footers and noise.\n\n"
+            "Staging records moved from Staged → Ready → Imported, while non-workspace chatter was marked Rejected with the appropriate reason."
+        ),
+        (
+            "During last night's Auto-Sync window, the Exchange filters pulled in emails for the "
+            "'AI Workspace Processing Policy' rollout. A few messages from excluded domains were "
+            "skipped immediately by the custom setting rules, but the rest were written to staging "
+            "with Status=Staged and the raw body encrypted.\n\n"
+            "Job 2 resolved WhoIds based on the sender and recipient addresses and promoted the "
+            "qualified records to Status=Ready. Job 3 then executed the processing policy prompt, "
+            "calling the API data source to bring in related Tasks and Cases before constructing "
+            "the AI request.\n\n"
+            "For emails where isRelevant=false the system did not create EmailMessage records and "
+            "instead updated staging to Rejected with a clear rejection reason."
+        ),
+        (
+            "We completed a dry run of the new Workspace Processing Policy for the 'Customer Success' "
+            "team. The Auto-Sync scheduler fired on time, fetched only non-excluded emails, and "
+            "created staging rows with Status=Staged.\n\n"
+            "When Job 2 attempted to match contacts, a subset of records failed WhoId resolution and "
+            "were safely deleted from staging. The remaining items were promoted to Ready and passed "
+            "into the AI prompt along with context from the API data source (recent Cases, open "
+            "Opportunities and last-touch Activities).\n\n"
+            "The AI responded with isRelevant, RelatedToId and EmailSummary. Relevant items became "
+            "EmailMessage records with the proper WhoId/WhatId mapping, while one malformed thread "
+            "was flagged as Errored so we can review it separately."
+        )
+    ]
+
     CONTACT_FIRST_NAMES = [
         "John", "Jane", "Michael", "Sarah", "David", "Emily", "Robert", "Lisa",
         "James", "Mary", "William", "Patricia", "Richard", "Jennifer", "Thomas", "Linda"
@@ -358,11 +396,13 @@ class DataGenerator:
 
         return {
             'type': 'followup',
-            'subject': f"Following up on {context.split(' ', 1)[1] if ' ' in context else 'our discussion'}",
+            'subject': f"Workspace Sync: follow-up on {context.split(' ', 1)[1] if ' ' in context else 'our discussion'}",
             'context': context,
             'sender': self._random_name(),
             'action_items': self._generate_action_items(),
-            'next_steps': self._generate_next_steps()
+            'next_steps': self._generate_next_steps(),
+            # Story-style body so downstream AI can test relevance/matching/filtering
+            'custom_message': random.choice(self.WORKSPACE_POLICY_STORIES)
         }
 
     def _generate_thank_you(self) -> Dict:
@@ -381,17 +421,18 @@ class DataGenerator:
     def _generate_project_update(self) -> Dict:
         """Generate a project update email"""
         milestone = random.choice(self.PROJECT_MILESTONES)
-        project_name = f"{random.choice(self.OPPORTUNITY_TYPES)} Project"
+        project_name = "Workspace Auto-Sync & Processing Policy Rollout"
 
         return {
             'type': 'project_update',
-            'subject': f"Project Update: {milestone}",
+            'subject': f"Workspace Project Update: {milestone}",
             'project_name': project_name,
             'milestone': milestone,
             'completion': random.choice([60, 70, 75, 80, 85, 90]),
             'next_milestone': random.choice(self.PROJECT_MILESTONES),
             'manager': self._random_name(),
-            'status': random.choice(["On Track", "Ahead of Schedule", "Needs Attention"])
+            'status': random.choice(["On Track", "Ahead of Schedule", "Needs Attention"]),
+            'custom_message': random.choice(self.WORKSPACE_POLICY_STORIES)
         }
 
     def _generate_reminder(self) -> Dict:
@@ -400,11 +441,12 @@ class DataGenerator:
 
         return {
             'type': 'reminder',
-            'subject': f"Reminder: {reminder_type.split(' ', 2)[-1] if len(reminder_type.split(' ')) > 2 else reminder_type}",
+            'subject': f"Workspace Reminder: {reminder_type.split(' ', 2)[-1] if len(reminder_type.split(' ')) > 2 else reminder_type}",
             'reminder_about': reminder_type,
             'due_date': self._random_future_date(days_range=7),
             'priority': random.choice(["Normal", "High", "Urgent"]),
-            'sender': self._random_name()
+            'sender': self._random_name(),
+            'custom_message': random.choice(self.WORKSPACE_POLICY_STORIES)
         }
 
     def _generate_meeting_agenda(self) -> str:
