@@ -374,17 +374,7 @@
 
                 <!-- Email Configuration -->
                 <div class="form-section">
-                    <h2>⚙️ Email Configuration</h2>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>Opportunity Emails</label>
-                            <input type="number" id="num_opportunities" min="0" value="0" placeholder="0">
-                        </div>
-                        <div class="form-group">
-                            <label>Case Emails</label>
-                            <input type="number" id="num_cases" min="0" value="0" placeholder="0">
-                        </div>
-                    </div>
+                    <h2>⚙️ Business Email Configuration</h2>
                     <div class="form-group">
                         <label>Email Delay (seconds)</label>
                         <input type="number" id="delay_seconds" min="0" value="0" placeholder="0">
@@ -460,8 +450,6 @@
                 sender_password: document.getElementById('sender_password').value,
                 sender_name: document.getElementById('sender_name').value,
                 recipient_email: document.getElementById('recipient_email').value,
-                num_opportunities: parseInt(document.getElementById('num_opportunities').value) || 0,
-                num_cases: parseInt(document.getElementById('num_cases').value) || 0,
                 num_business: parseInt(document.getElementById('num_business').value) || 0,
                 delay_seconds: parseInt(document.getElementById('delay_seconds').value) || 0,
                 custom_message: document.getElementById('custom_message').value

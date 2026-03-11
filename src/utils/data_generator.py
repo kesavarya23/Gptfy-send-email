@@ -102,41 +102,41 @@ class DataGenerator:
         "quarterly report submission due"
     ]
 
-    # Workspace / Auto-Sync policy scenarios for richer, story-like emails
-    WORKSPACE_POLICY_STORIES = [
+    # Personal wellbeing snippets to make emails feel more human
+    PERSONAL_WELLBEING_SNIPPETS = [
+        "Hope you're having a good week and finding a bit of time to breathe between all the project work.",
+        "I know things have been busy on your side, so I appreciate you taking a moment to review this.",
+        "I hope everything is going well with your team and that you're not overloaded with back-to-back meetings.",
+        "Trust you're doing well and settling into the new quarter smoothly.",
+        "Hope your week is going okay and that you managed to get some downtime over the weekend."
+    ]
+
+    # Product-related business story snippets (trial feedback, questions, issues, demo interest)
+    PRODUCT_STORY_SNIPPETS = [
         (
-            "Over the last 24 hours the Workspace Auto-Sync job picked up a new batch of emails "
-            "for the 'Sales Operations' site. After applying the exclusion rules "
-            "(domains: gmail.com, yahoo.com; labels: Personal, Social), the remaining messages "
-            "went through the three-step policy:\n\n"
-            "1) Relevance Screening – the AI marked only the implementation-related conversations as isRelevant=true.\n"
-            "2) Record Matching – messages that mentioned specific Opportunity and Case numbers were matched and had their RelatedToId set.\n"
-            "3) Content Filtering – EmailSummary kept only the project details and removed signatures, marketing footers and noise.\n\n"
-            "Staging records moved from Staged → Ready → Imported, while non-workspace chatter was marked Rejected with the appropriate reason."
+            "We have started to see more usage from the recent product trials, and a few teams have "
+            "already shared detailed feedback about what is working well and what still feels confusing. "
+            "Some users are especially interested in how the reporting and analytics behave under real "
+            "load, while others are focusing more on day-to-day usability and how quickly new team "
+            "members can ramp up."
         ),
         (
-            "During last night's Auto-Sync window, the Exchange filters pulled in emails for the "
-            "'AI Workspace Processing Policy' rollout. A few messages from excluded domains were "
-            "skipped immediately by the custom setting rules, but the rest were written to staging "
-            "with Status=Staged and the raw body encrypted.\n\n"
-            "Job 2 resolved WhoIds based on the sender and recipient addresses and promoted the "
-            "qualified records to Status=Ready. Job 3 then executed the processing policy prompt, "
-            "calling the API data source to bring in related Tasks and Cases before constructing "
-            "the AI request.\n\n"
-            "For emails where isRelevant=false the system did not create EmailMessage records and "
-            "instead updated staging to Rejected with a clear rejection reason."
+            "Over the last couple of weeks we have received a steady stream of questions about specific "
+            "product capabilities, pricing options and how integrations would look in a real deployment. "
+            "A lot of the conversations centre around how flexible the configuration is and what it would "
+            "take to adapt the solution to each team's existing processes without forcing a big redesign."
         ),
         (
-            "We completed a dry run of the new Workspace Processing Policy for the 'Customer Success' "
-            "team. The Auto-Sync scheduler fired on time, fetched only non-excluded emails, and "
-            "created staging rows with Status=Staged.\n\n"
-            "When Job 2 attempted to match contacts, a subset of records failed WhoId resolution and "
-            "were safely deleted from staging. The remaining items were promoted to Ready and passed "
-            "into the AI prompt along with context from the API data source (recent Cases, open "
-            "Opportunities and last-touch Activities).\n\n"
-            "The AI responded with isRelevant, RelatedToId and EmailSummary. Relevant items became "
-            "EmailMessage records with the proper WhoId/WhatId mapping, while one malformed thread "
-            "was flagged as Errored so we can review it separately."
+            "Support has logged a handful of product issues from early adopters, mostly around edge cases "
+            "and advanced configurations rather than basic functionality. We are tracking these closely, "
+            "prioritising fixes where they block evaluation, and making sure we keep everyone updated on "
+            "expected timelines so trials can continue without unnecessary disruption."
+        ),
+        (
+            "We are also seeing increased interest in scheduling tailored product demos for different "
+            "stakeholder groups. Some teams want a high-level walkthrough focused on outcomes and roadmap, "
+            "while others prefer a deeper technical session where we can explore architecture, security "
+            "and how the solution would fit into their existing environment."
         )
     ]
 
@@ -378,6 +378,8 @@ class DataGenerator:
             "Office Building, Floor 3",
             "Client Site"
         ])
+        organizer = self._random_name()
+        recipient = self._random_name()
 
         return {
             'type': 'meeting_invitation',
@@ -386,67 +388,119 @@ class DataGenerator:
             'date': date,
             'time': time_slot,
             'location': location,
-            'organizer': self._random_name(),
-            'agenda': self._generate_meeting_agenda()
+            'organizer': organizer,
+            'agenda': self._generate_meeting_agenda(),
+            'recipient_name': recipient,
+            'sender_name': organizer,
+            'custom_message': (
+                f"{random.choice(self.PERSONAL_WELLBEING_SNIPPETS)} "
+                f"We'd like to use this session to walk through your current use of the product, "
+                f"discuss any feedback from the trial so far, and answer questions about how it would "
+                f"fit into your team's day-to-day work. "
+                f"{random.choice(self.PRODUCT_STORY_SNIPPETS)}"
+            )
         }
 
     def _generate_followup(self) -> Dict:
         """Generate a follow-up email"""
         context = random.choice(self.FOLLOWUP_CONTEXTS)
+        sender = self._random_name()
+        recipient = self._random_name()
 
         return {
             'type': 'followup',
-            'subject': f"Workspace Sync: follow-up on {context.split(' ', 1)[1] if ' ' in context else 'our discussion'}",
+            'subject': f"Following up on {context.split(' ', 1)[1] if ' ' in context else 'our discussion'}",
             'context': context,
-            'sender': self._random_name(),
+            'sender': sender,
             'action_items': self._generate_action_items(),
             'next_steps': self._generate_next_steps(),
-            # Story-style body so downstream AI can test relevance/matching/filtering
-            'custom_message': random.choice(self.WORKSPACE_POLICY_STORIES)
+            'recipient_name': recipient,
+            'sender_name': sender,
+            'custom_message': (
+                f"{random.choice(self.PERSONAL_WELLBEING_SNIPPETS)} "
+                f"I just wanted to circle back on {context} and make sure you have everything you "
+                f"need from our side. If new questions have come up from your team about the product, "
+                f"trial configuration or potential rollout plan, I'm happy to address them or schedule "
+                f"a deeper session. "
+                f"{random.choice(self.PRODUCT_STORY_SNIPPETS)}"
+            )
         }
 
     def _generate_thank_you(self) -> Dict:
         """Generate a thank you email"""
         reason = random.choice(self.THANKYOU_REASONS)
+        sender = self._random_name()
+        recipient = self._random_name()
 
         return {
             'type': 'thank_you',
             'subject': f"Thank you for {reason.split(' ', 1)[1] if ' ' in reason else reason}",
             'reason': reason,
-            'sender': self._random_name(),
+            'sender': sender,
             'company': random.choice(self.COMPANY_NAMES),
-            'additional_note': self._generate_thank_you_note()
+            'additional_note': self._generate_thank_you_note(),
+            'recipient_name': recipient,
+            'sender_name': sender,
+            'custom_message': (
+                f"{random.choice(self.PERSONAL_WELLBEING_SNIPPETS)} "
+                f"It really means a lot that you chose to explore the product with us and share "
+                f"honest feedback. Input from you and your team helps us shape the roadmap, "
+                f"prioritise improvements, and make sure we're solving real problems in a way that "
+                f"fits naturally into your business. "
+                f"{random.choice(self.PRODUCT_STORY_SNIPPETS)}"
+            )
         }
 
     def _generate_project_update(self) -> Dict:
         """Generate a project update email"""
         milestone = random.choice(self.PROJECT_MILESTONES)
-        project_name = "Workspace Auto-Sync & Processing Policy Rollout"
+        project_name = f"{random.choice(self.OPPORTUNITY_TYPES)} Project"
+        manager = self._random_name()
+        recipient = self._random_name()
 
         return {
             'type': 'project_update',
-            'subject': f"Workspace Project Update: {milestone}",
+            'subject': f"Project Update: {milestone}",
             'project_name': project_name,
             'milestone': milestone,
             'completion': random.choice([60, 70, 75, 80, 85, 90]),
             'next_milestone': random.choice(self.PROJECT_MILESTONES),
-            'manager': self._random_name(),
+            'manager': manager,
             'status': random.choice(["On Track", "Ahead of Schedule", "Needs Attention"]),
-            'custom_message': random.choice(self.WORKSPACE_POLICY_STORIES)
+            'custom_message': (
+                f"{random.choice(self.PERSONAL_WELLBEING_SNIPPETS)} "
+                f"From a project perspective, we're steadily moving through the current milestone "
+                f"and starting to plan the next phase of the rollout. If there are any risks on your "
+                f"side (resourcing, timelines, competing initiatives), this is a great time to surface "
+                f"them so we can keep things on track together. "
+                f"{random.choice(self.PRODUCT_STORY_SNIPPETS)}"
+            ),
+            'recipient_name': recipient,
+            'sender_name': manager
         }
 
     def _generate_reminder(self) -> Dict:
         """Generate a reminder email"""
         reminder_type = random.choice(self.REMINDER_TYPES)
+        sender = self._random_name()
+        recipient = self._random_name()
 
         return {
             'type': 'reminder',
-            'subject': f"Workspace Reminder: {reminder_type.split(' ', 2)[-1] if len(reminder_type.split(' ')) > 2 else reminder_type}",
+            'subject': f"Reminder: {reminder_type.split(' ', 2)[-1] if len(reminder_type.split(' ')) > 2 else reminder_type}",
             'reminder_about': reminder_type,
             'due_date': self._random_future_date(days_range=7),
             'priority': random.choice(["Normal", "High", "Urgent"]),
-            'sender': self._random_name(),
-            'custom_message': random.choice(self.WORKSPACE_POLICY_STORIES)
+            'sender': sender,
+            'custom_message': (
+                f"{random.choice(self.PERSONAL_WELLBEING_SNIPPETS)} "
+                f"This is just a friendly reminder about the {reminder_type}. If priorities have shifted "
+                f"or you need more time to collect feedback from the trial or review open issues, "
+                f"please let me know and we can adjust the plan together. "
+                f"{random.choice(self.PRODUCT_STORY_SNIPPETS)}"
+            ),
+            'recipient_name': recipient,
+            'sender_name': sender
         }
 
     def _generate_meeting_agenda(self) -> str:

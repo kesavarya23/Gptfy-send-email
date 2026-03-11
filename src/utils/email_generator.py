@@ -241,30 +241,61 @@ class EmailGenerator:
 
             logger.info(f"Generated {email_type} email")
 
-            # Build plain-text version using common business fields
+            # Build richer plain-text version (aim for 10–15 lines)
+            recipient_name = template_data.get('recipient_name', 'there')
+            sender_name = template_data.get('sender_name', 'Your team')
+            custom_message = template_data.get('custom_message', '')
+
             lines = [
-                f"{subject}",
+                subject,
                 "",
-                f"Type: {email_type}",
+                f"Hi {recipient_name},",
+                "",
             ]
 
-            # Optional common fields
-            if 'recipient_name' in template_data:
-                lines.append(f"To: {template_data['recipient_name']}")
-            if 'sender_name' in template_data:
-                lines.append(f"From: {template_data['sender_name']}")
-            if 'project_name' in template_data:
-                lines.append(f"Project: {template_data['project_name']}")
-            if 'meeting_date' in template_data:
-                lines.append(f"Meeting Date: {template_data['meeting_date']}")
-            if 'due_date' in template_data:
-                lines.append(f"Due Date: {template_data['due_date']}")
-            if 'custom_message' in template_data:
-                lines.extend(["", f"Message: {template_data['custom_message']}"])
+            # Type-specific context lines
+            if email_type == 'meeting_invitation':
+                lines.extend([
+                    "I wanted to send over the details for our upcoming meeting so you have everything in one place.",
+                    f"Date: {template_data.get('date', 'TBD')}",
+                    f"Time: {template_data.get('time', 'TBD')}",
+                    f"Location: {template_data.get('location', 'TBD')}",
+                ])
+            elif email_type == 'followup':
+                lines.append(f"I'm following up on {template_data.get('context', 'our recent conversation')} and next steps we discussed.")
+            elif email_type == 'thank_you':
+                lines.append(f"Thank you again for {template_data.get('reason', 'your support and collaboration')} with us.")
+            elif email_type == 'project_update':
+                lines.extend([
+                    f"This is a quick update on the \"{template_data.get('project_name', 'project')}\" work.",
+                    f"Current milestone: {template_data.get('milestone', 'N/A')}",
+                    f"Overall completion: {template_data.get('completion', 'N/A')}%",
+                    f"Status: {template_data.get('status', 'N/A')}",
+                ])
+            elif email_type == 'reminder':
+                lines.append(f"This is a friendly reminder about the {template_data.get('reminder_about', 'upcoming item')} due on {template_data.get('due_date', 'TBD')}.")
 
+            # Add custom message split into multiple lines for more natural flow
+            if custom_message:
+                lines.append("")
+                # Naive sentence splitting to create more lines
+                for sentence in custom_message.split(". "):
+                    sentence = sentence.strip()
+                    if sentence:
+                        if not sentence.endswith("."):
+                            sentence += "."
+                        lines.append(sentence)
+
+            # Closing and sign-off
             lines.extend([
                 "",
-                f"Generated at: {template_data.get('generated_date')}"
+                "If anything here doesn't quite match your expectations, please let me know so we can adjust.",
+                "Thanks again for your time and support.",
+                "",
+                f"Best regards,",
+                sender_name,
+                "",
+                f"Generated at: {template_data.get('generated_date')}",
             ])
 
             plain_text = "\n".join(lines)
