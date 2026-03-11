@@ -68,7 +68,11 @@ class EmailService:
         """
         try:
             # Create message
-            msg = MIMEMultipart('alternative')
+            # If plain_text is provided, send a simple plain text email only.
+            if plain_text:
+                msg = MIMEText(plain_text, 'plain')
+            else:
+                msg = MIMEMultipart('alternative')
             msg['From'] = f"{self.sender_name} <{self.sender_email}>"
             msg['To'] = to_email
             msg['Subject'] = subject
@@ -78,14 +82,11 @@ class EmailService:
             if bcc:
                 msg['Bcc'] = ', '.join(bcc)
 
-            # Attach plain text version
-            if plain_text:
-                text_part = MIMEText(plain_text, 'plain')
-                msg.attach(text_part)
-
-            # Attach HTML version
-            html_part = MIMEText(html_content, 'html')
-            msg.attach(html_part)
+            # For pure plain text emails, we've already built the body above.
+            # Only attach HTML if no plain text is provided.
+            if not plain_text:
+                html_part = MIMEText(html_content, 'html')
+                msg.attach(html_part)
 
             # Create recipient list
             recipients = [to_email]

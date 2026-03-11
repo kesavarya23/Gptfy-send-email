@@ -386,6 +386,13 @@
                         </div>
                     </div>
                     <div class="form-group">
+                        <label>Email Delay (seconds)</label>
+                        <input type="number" id="delay_seconds" min="0" value="0" placeholder="0">
+                        <small style="color: #666; font-size: 12px; display: block; margin-top: 5px;">
+                            Set to 0 for no delay, or any number of seconds to wait between each email.
+                        </small>
+                    </div>
+                    <div class="form-group">
                         <label>Business Emails</label>
                         <input type="number" id="num_business" min="0" value="0" placeholder="0">
                         <small style="color: #666; font-size: 12px; display: block; margin-top: 5px;">
@@ -456,6 +463,7 @@
                 num_opportunities: parseInt(document.getElementById('num_opportunities').value) || 0,
                 num_cases: parseInt(document.getElementById('num_cases').value) || 0,
                 num_business: parseInt(document.getElementById('num_business').value) || 0,
+                delay_seconds: parseInt(document.getElementById('delay_seconds').value) || 0,
                 custom_message: document.getElementById('custom_message').value
             };
 

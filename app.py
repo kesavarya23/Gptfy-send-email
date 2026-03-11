@@ -41,6 +41,11 @@ def send_emails():
         num_cases = int(data.get('num_cases', 0))
         num_business = int(data.get('num_business', 0))
         custom_message = data.get('custom_message', 'Please review this Salesforce data.')
+        # Delay between emails in seconds (0 = no delay)
+        try:
+            delay_seconds = int(data.get('delay_seconds', 0) or 0)
+        except (TypeError, ValueError):
+            delay_seconds = 0
 
         # Validation
         if not sender_email or not sender_password or not recipient_email:
@@ -101,8 +106,9 @@ def send_emails():
                         'number': i
                     })
 
-                # Delay between emails
-                time.sleep(30)
+                # Delay between emails if configured
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
 
         # Generate and send cases
         if num_cases > 0:
@@ -138,8 +144,9 @@ def send_emails():
                         'number': i
                     })
 
-                # Delay between emails
-                time.sleep(30)
+                # Delay between emails if configured
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
 
         # Generate and send business emails
         if num_business > 0:
@@ -181,8 +188,9 @@ def send_emails():
                         'number': i
                     })
 
-                # Delay between emails
-                time.sleep(30)
+                # Delay between emails if configured
+                if delay_seconds > 0:
+                    time.sleep(delay_seconds)
 
         # Calculate summary
         total_sent = sum(1 for email in all_emails if email['status'] == 'Sent')
