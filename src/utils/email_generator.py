@@ -221,7 +221,11 @@ class EmailGenerator:
                 'followup': 'followup.html',
                 'thank_you': 'thank_you.html',
                 'project_update': 'project_update.html',
-                'reminder': 'reminder.html'
+                'reminder': 'reminder.html',
+                'trial_feedback': 'generic_business.html',
+                'product_queries': 'generic_business.html',
+                'product_issues': 'generic_business.html',
+                'demo_enquiry': 'generic_business.html',
             }
 
             template_name = template_map.get(email_type)
@@ -272,6 +276,14 @@ class EmailGenerator:
                 ])
             elif email_type == 'reminder':
                 lines.append(f"This is a friendly reminder about the {template_data.get('reminder_about', 'upcoming item')} due on {template_data.get('due_date', 'TBD')}.")
+            elif email_type == 'trial_feedback':
+                lines.append("Thank you for trying the product. We'd like to hear how it's going and have shared an update below.")
+            elif email_type == 'product_queries':
+                lines.append("Here are some answers to the questions you raised about the product.")
+            elif email_type == 'product_issues':
+                lines.append("We wanted to give you an update on the product issues you reported.")
+            elif email_type == 'demo_enquiry':
+                lines.append("Thank you for your interest in a product demo. We would be glad to arrange one.")
 
             # Add custom message split into multiple lines for more natural flow
             if custom_message:

@@ -5,7 +5,7 @@ Generates random Salesforce opportunities and cases for email sending
 
 import random
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
 class DataGenerator:
@@ -313,31 +313,41 @@ class DataGenerator:
         ]
         return random.choice(resolutions)
 
-    def generate_business_emails(self, count: int) -> List[Dict]:
+    def generate_business_emails(self, count: int, topic_types: Optional[List[str]] = None) -> List[Dict]:
         """
-        Generate random business emails distributed across 5 types
-        Types: Meeting Invitation, Follow-up, Thank You, Project Update, Reminder
+        Generate random business emails distributed across selected types.
 
         Args:
             count: Total number of business emails to generate
+            topic_types: If provided, only these types are used. If None or empty, all 9 types are used.
 
         Returns:
             List of business email dictionaries with 'type' and 'data' keys
         """
         emails = []
 
-        # Define email types
-        email_types = [
+        # All 9 valid types
+        all_types = [
             'meeting_invitation',
             'followup',
             'thank_you',
             'project_update',
-            'reminder'
+            'reminder',
+            'trial_feedback',
+            'product_queries',
+            'product_issues',
+            'demo_enquiry'
         ]
 
-        # Distribute count evenly across types
-        per_type = count // 5
-        remainder = count % 5
+        # Use selected types or all
+        if topic_types:
+            email_types = [t for t in topic_types if t in all_types]
+        if not topic_types or not email_types:
+            email_types = all_types
+
+        num_types = len(email_types)
+        per_type = count // num_types
+        remainder = count % num_types
 
         # Generate emails for each type
         for idx, email_type in enumerate(email_types):
@@ -355,6 +365,14 @@ class DataGenerator:
                     emails.append(self._generate_project_update())
                 elif email_type == 'reminder':
                     emails.append(self._generate_reminder())
+                elif email_type == 'trial_feedback':
+                    emails.append(self._generate_trial_feedback())
+                elif email_type == 'product_queries':
+                    emails.append(self._generate_product_queries())
+                elif email_type == 'product_issues':
+                    emails.append(self._generate_product_issues())
+                elif email_type == 'demo_enquiry':
+                    emails.append(self._generate_demo_enquiry())
 
         # Shuffle to mix types
         random.shuffle(emails)
@@ -501,6 +519,106 @@ class DataGenerator:
             ),
             'recipient_name': recipient,
             'sender_name': sender
+        }
+
+    def _generate_trial_feedback(self) -> Dict:
+        """Generate a product trial feedback email"""
+        sender = self._random_name()
+        recipient = self._random_name()
+        return {
+            'type': 'trial_feedback',
+            'subject': random.choice([
+                "Product trial feedback",
+                "Following up on your trial feedback",
+                "Your feedback on the product trial",
+            ]),
+            'recipient_name': recipient,
+            'sender_name': sender,
+            'title': 'Product Trial Feedback',
+            'message': "Thank you for trying the product. We'd like to hear how it's going.",
+            'custom_message': (
+                f"{random.choice(self.PERSONAL_WELLBEING_SNIPPETS)} "
+                f"We have started to see more usage from the recent product trials, and a few teams have "
+                f"already shared detailed feedback about what is working well and what still feels confusing. "
+                f"Some users are especially interested in how the reporting and analytics behave under real "
+                f"load, while others are focusing more on day-to-day usability and how quickly new team "
+                f"members can ramp up. We would value your input so we can keep improving."
+            )
+        }
+
+    def _generate_product_queries(self) -> Dict:
+        """Generate a product queries email"""
+        sender = self._random_name()
+        recipient = self._random_name()
+        return {
+            'type': 'product_queries',
+            'subject': random.choice([
+                "Queries regarding the product",
+                "Your questions about the product",
+                "Product capabilities and pricing",
+            ]),
+            'recipient_name': recipient,
+            'sender_name': sender,
+            'title': 'Queries Regarding the Product',
+            'message': "Here are some answers to the questions you raised about the product.",
+            'custom_message': (
+                f"{random.choice(self.PERSONAL_WELLBEING_SNIPPETS)} "
+                f"Over the last couple of weeks we have received a steady stream of questions about specific "
+                f"product capabilities, pricing options and how integrations would look in a real deployment. "
+                f"A lot of the conversations centre around how flexible the configuration is and what it would "
+                f"take to adapt the solution to each team's existing processes without forcing a big redesign. "
+                f"Happy to schedule a call if you have more questions."
+            )
+        }
+
+    def _generate_product_issues(self) -> Dict:
+        """Generate a product issues email"""
+        sender = self._random_name()
+        recipient = self._random_name()
+        return {
+            'type': 'product_issues',
+            'subject': random.choice([
+                "Issues in the product – update",
+                "Product issue follow-up",
+                "Update on reported product issues",
+            ]),
+            'recipient_name': recipient,
+            'sender_name': sender,
+            'title': 'Product Issues Update',
+            'message': "We wanted to give you an update on the product issues you reported.",
+            'custom_message': (
+                f"{random.choice(self.PERSONAL_WELLBEING_SNIPPETS)} "
+                f"Support has logged a handful of product issues from early adopters, mostly around edge cases "
+                f"and advanced configurations rather than basic functionality. We are tracking these closely, "
+                f"prioritising fixes where they block evaluation, and making sure we keep everyone updated on "
+                f"expected timelines so trials can continue without unnecessary disruption. We will reach out "
+                f"again once a fix is available."
+            )
+        }
+
+    def _generate_demo_enquiry(self) -> Dict:
+        """Generate an enquiry for product demo email"""
+        sender = self._random_name()
+        recipient = self._random_name()
+        return {
+            'type': 'demo_enquiry',
+            'subject': random.choice([
+                "Enquiry for product demo",
+                "Product demo – next steps",
+                "Scheduling your product demo",
+            ]),
+            'recipient_name': recipient,
+            'sender_name': sender,
+            'title': 'Enquiry for Product Demo',
+            'message': "Thank you for your interest in a product demo. We would be glad to arrange one.",
+            'custom_message': (
+                f"{random.choice(self.PERSONAL_WELLBEING_SNIPPETS)} "
+                f"We are seeing increased interest in scheduling tailored product demos for different "
+                f"stakeholder groups. Some teams want a high-level walkthrough focused on outcomes and roadmap, "
+                f"while others prefer a deeper technical session where we can explore architecture, security "
+                f"and how the solution would fit into your existing environment. Let us know your preference "
+                f"and we will send a calendar invite."
+            )
         }
 
     def _generate_meeting_agenda(self) -> str:

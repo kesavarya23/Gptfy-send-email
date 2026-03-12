@@ -40,6 +40,8 @@ def send_emails():
         num_opportunities = int(data.get('num_opportunities', 0))
         num_cases = int(data.get('num_cases', 0))
         num_business = int(data.get('num_business', 0))
+        topic_mode = data.get('topic_mode', 'default')
+        selected_topics = data.get('selected_topics') or []
         custom_message = data.get('custom_message', 'Please review this Salesforce data.')
         # Delay between emails in seconds (0 = no delay)
         try:
@@ -58,6 +60,12 @@ def send_emails():
             return jsonify({
                 'success': False,
                 'error': 'Please specify at least 1 opportunity, case, or business email'
+            })
+
+        if num_business > 0 and topic_mode == 'custom' and not selected_topics:
+            return jsonify({
+                'success': False,
+                'error': 'Please select at least one topic when using Custom mode'
             })
 
         # Initialize services
@@ -150,7 +158,8 @@ def send_emails():
 
         # Generate and send business emails
         if num_business > 0:
-            business_emails = data_generator.generate_business_emails(num_business)
+            topic_types = selected_topics if topic_mode == 'custom' and selected_topics else None
+            business_emails = data_generator.generate_business_emails(num_business, topic_types=topic_types)
 
             for i, business_email in enumerate(business_emails, 1):
                 try:
@@ -169,7 +178,11 @@ def send_emails():
                         'followup': 'Follow-up',
                         'thank_you': 'Thank You',
                         'project_update': 'Project Update',
-                        'reminder': 'Reminder'
+                        'reminder': 'Reminder',
+                        'trial_feedback': 'Product Trial Feedback',
+                        'product_queries': 'Product Queries',
+                        'product_issues': 'Product Issues',
+                        'demo_enquiry': 'Demo Enquiry',
                     }
 
                     all_emails.append({

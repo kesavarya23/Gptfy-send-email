@@ -313,6 +313,60 @@
             margin: 5px 0;
         }
 
+        /* Segment control */
+        .segment-control {
+            display: inline-flex;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+        .segment-option {
+            padding: 10px 24px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border: none;
+            background: #f5f5f5;
+            color: #666;
+            transition: all 0.2s;
+        }
+        .segment-option:first-child {
+            border-right: 1px solid #e0e0e0;
+        }
+        .segment-option:hover {
+            background: #eee;
+        }
+        .segment-option.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .topic-checkboxes {
+            display: none;
+            margin-top: 12px;
+            padding: 16px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        .topic-checkboxes.show {
+            display: block;
+        }
+        .topic-checkbox-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+            cursor: pointer;
+        }
+        .topic-checkbox-item input {
+            width: auto;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+        .default-hint {
+            margin-top: 8px;
+        }
+
         @media (max-width: 768px) {
             .form-row {
                 grid-template-columns: 1fr;
@@ -378,9 +432,28 @@
                     <div class="form-group">
                         <label>Business Emails</label>
                         <input type="number" id="num_business" min="0" value="0" placeholder="0">
-                        <small style="color: #666; font-size: 12px; display: block; margin-top: 5px;">
-                            ℹ️ Auto-distributes evenly: Meeting Invitations, Follow-ups, Thank You, Project Updates, Reminders
-                        </small>
+                        <label style="margin-top: 12px; margin-bottom: 6px; display: block; font-size: 14px; color: #333;">Topic selection</label>
+                        <div class="segment-control">
+                            <button type="button" class="segment-option active" data-mode="default" id="segmentDefault">Default</button>
+                            <button type="button" class="segment-option" data-mode="custom" id="segmentCustom">Custom</button>
+                        </div>
+                        <div id="defaultHint" class="default-hint">
+                            <small style="color: #666; font-size: 12px;">
+                                ℹ️ Auto-distributes evenly across all 9 topics: Meeting, Follow-up, Thank You, Project Update, Reminder, Trial Feedback, Product Queries, Product Issues, Demo Enquiry
+                            </small>
+                        </div>
+                        <div id="customTopics" class="topic-checkboxes">
+                            <small style="color: #666; font-size: 12px; display: block; margin-bottom: 10px;">Select the topics to include:</small>
+                            <label class="topic-checkbox-item"><input type="checkbox" name="topic" value="meeting_invitation"> Meeting Invitation</label>
+                            <label class="topic-checkbox-item"><input type="checkbox" name="topic" value="followup"> Follow-up</label>
+                            <label class="topic-checkbox-item"><input type="checkbox" name="topic" value="thank_you"> Thank You</label>
+                            <label class="topic-checkbox-item"><input type="checkbox" name="topic" value="project_update"> Project Update</label>
+                            <label class="topic-checkbox-item"><input type="checkbox" name="topic" value="reminder"> Reminder</label>
+                            <label class="topic-checkbox-item"><input type="checkbox" name="topic" value="trial_feedback"> Product Trial Feedback</label>
+                            <label class="topic-checkbox-item"><input type="checkbox" name="topic" value="product_queries"> Product Queries</label>
+                            <label class="topic-checkbox-item"><input type="checkbox" name="topic" value="product_issues"> Product Issues</label>
+                            <label class="topic-checkbox-item"><input type="checkbox" name="topic" value="demo_enquiry"> Demo Enquiry</label>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>Email Delay (seconds)</label>
@@ -428,6 +501,20 @@
     </div>
 
     <script>
+        // Segment control: Default vs Custom
+        document.getElementById('segmentDefault').addEventListener('click', function() {
+            document.getElementById('segmentDefault').classList.add('active');
+            document.getElementById('segmentCustom').classList.remove('active');
+            document.getElementById('defaultHint').style.display = 'block';
+            document.getElementById('customTopics').classList.remove('show');
+        });
+        document.getElementById('segmentCustom').addEventListener('click', function() {
+            document.getElementById('segmentCustom').classList.add('active');
+            document.getElementById('segmentDefault').classList.remove('active');
+            document.getElementById('defaultHint').style.display = 'none';
+            document.getElementById('customTopics').classList.add('show');
+        });
+
         document.getElementById('emailForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -435,6 +522,16 @@
             document.getElementById('results').classList.remove('show');
             document.getElementById('errorMessage').classList.remove('show');
             document.getElementById('successMessage').classList.remove('show');
+
+            const topicMode = document.getElementById('segmentDefault').classList.contains('active') ? 'default' : 'custom';
+            const topicCheckboxes = document.querySelectorAll('input[name="topic"]:checked');
+            const selectedTopics = Array.from(topicCheckboxes).map(cb => cb.value);
+
+            if (topicMode === 'custom' && selectedTopics.length === 0) {
+                document.getElementById('errorMessage').textContent = 'Please select at least one topic for Custom mode.';
+                document.getElementById('errorMessage').classList.add('show');
+                return;
+            }
 
             // Show loading
             document.getElementById('loading').style.display = 'block';
@@ -447,7 +544,9 @@
                 sender_name: document.getElementById('sender_name').value,
                 recipient_email: document.getElementById('recipient_email').value,
                 num_business: parseInt(document.getElementById('num_business').value) || 0,
-                delay_seconds: parseInt(document.getElementById('delay_seconds').value) || 0
+                delay_seconds: parseInt(document.getElementById('delay_seconds').value) || 0,
+                topic_mode: topicMode,
+                selected_topics: topicMode === 'custom' ? selectedTopics : []
             };
 
             try {
@@ -505,7 +604,11 @@
                             'Follow-up': 'type-followup',
                             'Thank You': 'type-thankyou',
                             'Project Update': 'type-project',
-                            'Reminder': 'type-reminder'
+                            'Reminder': 'type-reminder',
+                            'Product Trial Feedback': 'type-followup',
+                            'Product Queries': 'type-meeting',
+                            'Product Issues': 'type-reminder',
+                            'Demo Enquiry': 'type-project'
                         };
                         return typeMap[type] || 'type-opportunity';
                     }
