@@ -247,8 +247,6 @@ class EmailGenerator:
             custom_message = template_data.get('custom_message', '')
 
             lines = [
-                subject,
-                "",
                 f"Hi {recipient_name},",
                 "",
             ]
@@ -292,10 +290,8 @@ class EmailGenerator:
                 "If anything here doesn't quite match your expectations, please let me know so we can adjust.",
                 "Thanks again for your time and support.",
                 "",
-                f"Best regards,",
+                "Best regards,",
                 sender_name,
-                "",
-                f"Generated at: {template_data.get('generated_date')}",
             ])
 
             plain_text = "\n".join(lines)
