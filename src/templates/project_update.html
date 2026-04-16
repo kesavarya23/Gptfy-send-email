@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background-color: #9C27B0;
+            color: white;
+            padding: 20px;
+            border-radius: 5px 5px 0 0;
+        }
+        .content {
+            background-color: #f4f6f9;
+            padding: 20px;
+            border: 1px solid #ddd;
+        }
+        .detail-row {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: white;
+            border-left: 3px solid #9C27B0;
+        }
+        .label {
+            font-weight: bold;
+            color: #9C27B0;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background-color: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #9C27B0 0%, #E1BEE7 100%);
+            text-align: center;
+            line-height: 30px;
+            color: white;
+            font-weight: bold;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        .on-track {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .ahead {
+            background-color: #2196F3;
+            color: white;
+        }
+        .attention {
+            background-color: #FF9800;
+            color: white;
+        }
+        .footer {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f4f6f9;
+            border-top: 2px solid #9C27B0;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>📊 Project Update</h2>
+        </div>
+        <div class="content">
+            <p>Hello Team,</p>
+            <p>Here's the latest update on our project progress:</p>
+
+            <div class="detail-row">
+                <span class="label">Project Name:</span> {{ project_name }}
+            </div>
+
+            <div class="detail-row">
+                <span class="label">Current Milestone:</span> {{ milestone }}
+            </div>
+
+            <div class="detail-row">
+                <span class="label">Project Manager:</span> {{ manager }}
+            </div>
+
+            <div class="detail-row">
+                <span class="label">Status:</span>
+                <span class="status-badge {% if status == 'On Track' %}on-track{% elif status == 'Ahead of Schedule' %}ahead{% else %}attention{% endif %}">
+                    {{ status }}
+                </span>
+            </div>
+
+            <div style="margin: 20px 0;">
+                <span class="label">Overall Completion:</span>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: {{ completion }}%;">
+                        {{ completion }}%
+                    </div>
+                </div>
+            </div>
+
+            {% if next_milestone %}
+            <div class="detail-row">
+                <span class="label">Next Milestone:</span> {{ next_milestone }}
+            </div>
+            {% endif %}
+
+            <p style="margin-top: 20px;">
+                Thank you for your continued dedication to this project. Please reach out if you have any questions or concerns.
+            </p>
+        </div>
+        <div class="footer">
+            <p>This is an automated email from your Business Email System.</p>
+            <p>Generated on: {{ generated_date }}</p>
+        </div>
+    </div>
+</body>
+</html>

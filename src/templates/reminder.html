@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .header {
+            background-color: #F44336;
+            color: white;
+            padding: 20px;
+            border-radius: 5px 5px 0 0;
+        }
+        .content {
+            background-color: #f4f6f9;
+            padding: 20px;
+            border: 1px solid #ddd;
+        }
+        .detail-row {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: white;
+            border-left: 3px solid #F44336;
+        }
+        .label {
+            font-weight: bold;
+            color: #F44336;
+        }
+        .priority-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        .normal {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .high {
+            background-color: #FF9800;
+            color: white;
+        }
+        .urgent {
+            background-color: #F44336;
+            color: white;
+        }
+        .reminder-box {
+            background-color: #ffebee;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            border: 2px solid #F44336;
+            font-size: 16px;
+        }
+        .footer {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f4f6f9;
+            border-top: 2px solid #F44336;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>⏰ Reminder</h2>
+        </div>
+        <div class="content">
+            <p>Hello,</p>
+            <p>This is a reminder about the following:</p>
+
+            <div class="reminder-box">
+                <strong>{{ reminder_about }}</strong>
+            </div>
+
+            <div class="detail-row">
+                <span class="label">Due Date:</span> {{ due_date }}
+            </div>
+
+            <div class="detail-row">
+                <span class="label">Priority:</span>
+                <span class="priority-badge {% if priority == 'Normal' %}normal{% elif priority == 'High' %}high{% else %}urgent{% endif %}">
+                    {{ priority }}
+                </span>
+            </div>
+
+            <div class="detail-row">
+                <span class="label">From:</span> {{ sender }}
+            </div>
+
+            <p style="margin-top: 20px;">
+                Please take the necessary action before the due date. If you need any assistance or have questions, feel free to reach out.
+            </p>
+        </div>
+        <div class="footer">
+            <p>This is an automated email from your Business Email System.</p>
+            <p>Generated on: {{ generated_date }}</p>
+        </div>
+    </div>
+</body>
+</html>

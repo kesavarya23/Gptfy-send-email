@@ -1,0 +1,44 @@
+[
+  {
+    "case_number": "00001234",
+    "subject": "Unable to access dashboard after latest update",
+    "status": "New",
+    "priority": "High",
+    "type": "Technical Issue",
+    "origin": "Web",
+    "account_name": "Acme Corporation",
+    "contact_name": "Jane Doe",
+    "owner_name": "Support Team Alpha",
+    "description": "Customer reports that after the latest system update, they cannot access the main dashboard. Error message 'Access Denied' appears.",
+    "resolution": "",
+    "created_date": "2025-01-15"
+  },
+  {
+    "case_number": "00001235",
+    "subject": "Request for additional user licenses",
+    "status": "In Progress",
+    "priority": "Medium",
+    "type": "License Request",
+    "origin": "Email",
+    "account_name": "TechStart Inc",
+    "contact_name": "Bob Wilson",
+    "owner_name": "Licensing Team",
+    "description": "Customer needs 10 additional user licenses for their growing team",
+    "resolution": "Quote prepared and sent to customer",
+    "created_date": "2025-01-10"
+  },
+  {
+    "case_number": "00001236",
+    "subject": "Data export functionality not working",
+    "status": "Escalated",
+    "priority": "High",
+    "type": "Bug",
+    "origin": "Phone",
+    "account_name": "Global Finance Ltd",
+    "contact_name": "Alice Brown",
+    "owner_name": "Engineering Team",
+    "description": "Export to CSV function is timing out for large datasets (>10000 records)",
+    "resolution": "",
+    "created_date": "2025-01-12"
+  }
+]
