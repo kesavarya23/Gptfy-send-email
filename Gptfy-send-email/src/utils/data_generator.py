@@ -313,13 +313,19 @@ class DataGenerator:
         ]
         return random.choice(resolutions)
 
-    def generate_business_emails(self, count: int, topic_types: Optional[List[str]] = None) -> List[Dict]:
+    def generate_business_emails(
+        self,
+        count: int,
+        topic_types: Optional[List[str]] = None,
+        salesforce_context: Optional[str] = None,
+    ) -> List[Dict]:
         """
         Generate random business emails distributed across selected types.
 
         Args:
             count: Total number of business emails to generate
             topic_types: If provided, only these types are used. If None or empty, all 9 types are used.
+            salesforce_context: Optional text (account + opportunity) prepended to each custom_message.
 
         Returns:
             List of business email dictionaries with 'type' and 'data' keys
@@ -376,6 +382,14 @@ class DataGenerator:
 
         # Shuffle to mix types
         random.shuffle(emails)
+
+        if salesforce_context and salesforce_context.strip():
+            prefix = salesforce_context.strip() + "\n\n"
+            for em in emails:
+                if em.get("custom_message"):
+                    em["custom_message"] = prefix + em["custom_message"]
+                else:
+                    em["custom_message"] = salesforce_context.strip()
 
         return emails
 
