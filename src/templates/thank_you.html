@@ -59,6 +59,9 @@
         <div class="content">
             <p>Dear Valued Partner,</p>
             <p>Thank you for {{ reason }}.</p>
+            {% if custom_message %}
+            <p style="margin: 16px 0; line-height: 1.7; white-space: pre-wrap;">{{ custom_message }}</p>
+            {% endif %}
 
             <div class="detail-row">
                 <span class="label">From:</span> {{ sender }}

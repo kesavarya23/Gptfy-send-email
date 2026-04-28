@@ -106,3 +106,21 @@ def build_salesforce_context(
     if not parts:
         return None
     return "\n\n".join(parts)
+
+
+def combined_opportunity_text(opportunity_text: str, file_storage) -> str:
+    """
+    Same text combination as in build_salesforce_context (opportunity field + file upload)
+    for use in narrative generation without re-reading storage.
+    """
+    otxt = (opportunity_text or "").strip()
+    file_text = (
+        extract_text_from_upload(file_storage)
+        if file_storage and getattr(file_storage, "filename", None)
+        else ""
+    )
+    if not file_text:
+        return otxt
+    if not otxt:
+        return file_text
+    return (otxt + "\n\n" + file_text).strip()

@@ -18,6 +18,14 @@
         <div class="content">
             <p>Hello,</p>
             <p>{{ message }}</p>
+            {% if custom_message %}
+            <p style="margin: 16px 0; line-height: 1.7; white-space: pre-wrap;">{{ custom_message }}</p>
+            {% endif %}
+            {% if salesforce_account %}
+            <div class="detail-row">
+                <span class="label">Account:</span> {{ salesforce_account }}
+            </div>
+            {% endif %}
             <div class="detail-row">
                 <span class="label">From:</span> {{ sender_name }}
             </div>

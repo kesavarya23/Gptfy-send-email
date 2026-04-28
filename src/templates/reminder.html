@@ -83,6 +83,9 @@
             <div class="reminder-box">
                 <strong>{{ reminder_about }}</strong>
             </div>
+            {% if custom_message %}
+            <p style="margin: 16px 0; line-height: 1.7; white-space: pre-wrap;">{{ custom_message }}</p>
+            {% endif %}
 
             <div class="detail-row">
                 <span class="label">Due Date:</span> {{ due_date }}

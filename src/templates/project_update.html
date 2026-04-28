@@ -86,7 +86,14 @@
         </div>
         <div class="content">
             <p>Hello Team,</p>
+            {% if salesforce_account %}
+            <p style="margin-bottom: 8px;"><span class="label">Account:</span> {{ salesforce_account }}</p>
+            {% endif %}
+            {% if custom_message %}
+            <p style="margin: 16px 0; line-height: 1.7; white-space: pre-wrap;">{{ custom_message }}</p>
+            {% else %}
             <p>Here's the latest update on our project progress:</p>
+            {% endif %}
 
             <div class="detail-row">
                 <span class="label">Project Name:</span> {{ project_name }}
