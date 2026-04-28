@@ -268,12 +268,28 @@ class EmailGenerator:
             elif email_type == 'thank_you':
                 lines.append(f"Thank you again for {template_data.get('reason', 'your support and collaboration')} with us.")
             elif email_type == 'project_update':
-                lines.extend([
-                    f"This is a quick update on the \"{template_data.get('project_name', 'project')}\" work.",
-                    f"Current milestone: {template_data.get('milestone', 'N/A')}",
-                    f"Overall completion: {template_data.get('completion', 'N/A')}%",
-                    f"Status: {template_data.get('status', 'N/A')}",
-                ])
+                # After salutation, lead with the account-aligned narrative when present, then a short snapshot
+                if custom_message:
+                    lines.append("")
+                    for block in (custom_message or "").split("\n\n"):
+                        for sentence in (block or "").split(". "):
+                            sentence = sentence.strip()
+                            if sentence:
+                                if not sentence.endswith("."):
+                                    sentence += "."
+                                lines.append(sentence)
+                else:
+                    lines.append(
+                        f"This is a quick update on the \"{template_data.get('project_name', 'project')}\" work."
+                    )
+                lines.append("")
+                lines.append(
+                    f"At a glance — project: {template_data.get('project_name', 'N/A')}; "
+                    f"milestone: {template_data.get('milestone', 'N/A')}; "
+                    f"completion: {template_data.get('completion', 'N/A')}%; "
+                    f"status: {template_data.get('status', 'N/A')}"
+                )
+                custom_message = ""
             elif email_type == 'reminder':
                 lines.append(f"This is a friendly reminder about the {template_data.get('reminder_about', 'upcoming item')} due on {template_data.get('due_date', 'TBD')}.")
             elif email_type == 'trial_feedback':

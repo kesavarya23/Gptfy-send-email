@@ -23,7 +23,7 @@ from services.oauth_send import (
     send_gmail,
     send_outlook,
 )
-from utils.context_extract import build_salesforce_context
+from utils.context_extract import build_salesforce_context, combined_opportunity_text
 
 app = Flask(__name__)
 # Use a stable secret in production (e.g. Vercel env) so OAuth sessions survive restarts
@@ -294,10 +294,18 @@ def send_emails():
         # Generate and send business emails
         if num_business > 0:
             topic_types = selected_topics if topic_mode == 'custom' and selected_topics else None
+            acc_for_gen = (data.get("account_name") or "").strip() or None
+            opp_combined = (
+                combined_opportunity_text(data.get("opportunity_text") or "", opportunity_file)
+                if use_custom_context
+                else ""
+            )
             business_emails = data_generator.generate_business_emails(
                 num_business,
                 topic_types=topic_types,
                 salesforce_context=salesforce_context,
+                account_name=acc_for_gen,
+                opportunity_brief=opp_combined or None,
             )
 
             for i, business_email in enumerate(business_emails, 1):

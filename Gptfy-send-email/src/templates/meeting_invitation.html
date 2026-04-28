@@ -86,6 +86,13 @@
             </div>
             {% endif %}
 
+            {% if custom_message %}
+            <p style="margin: 16px 0; line-height: 1.7; white-space: pre-wrap;">{{ custom_message }}</p>
+            {% endif %}
+            {% if salesforce_account %}
+            <p><span class="label">Account focus:</span> {{ salesforce_account }}</p>
+            {% endif %}
+
             <p style="margin-top: 20px;">
                 Please confirm your attendance. We look forward to your participation.
             </p>

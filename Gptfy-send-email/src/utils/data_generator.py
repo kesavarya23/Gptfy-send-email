@@ -102,13 +102,18 @@ class DataGenerator:
         "quarterly report submission due"
     ]
 
-    # Personal wellbeing snippets to make emails feel more human
+    # Personal wellbeing snippets: professional but human (rest, family, time off, weekends)
     PERSONAL_WELLBEING_SNIPPETS = [
         "Hope you're having a good week and finding a bit of time to breathe between all the project work.",
         "I know things have been busy on your side, so I appreciate you taking a moment to review this.",
         "I hope everything is going well with your team and that you're not overloaded with back-to-back meetings.",
         "Trust you're doing well and settling into the new quarter smoothly.",
-        "Hope your week is going okay and that you managed to get some downtime over the weekend."
+        "Hope your week is going okay and that you managed to get some downtime over the weekend.",
+        "I hope you had a restful weekend and that the week ahead is kind to you and your family.",
+        "With the holidays coming up, I know schedules can get tight—thanks for making time for this.",
+        "Hoping you have been able to step away from the screen a little and enjoy some time with your people.",
+        "If you have a vacation or PTO on the horizon, we can line up this work so it does not land on your time off.",
+        "I hope the week has not been all early calls and late nights—wellbeing matters, and we can keep the pace sensible.",
     ]
 
     # Product-related business story snippets (trial feedback, questions, issues, demo interest)
@@ -138,6 +143,23 @@ class DataGenerator:
             "while others prefer a deeper technical session where we can explore architecture, security "
             "and how the solution would fit into their existing environment."
         )
+    ]
+
+    # When a Salesforce account is known, product copy should name the customer
+    PRODUCT_STORY_SNIPPETS_WITH_ACCOUNT = [
+        (
+            "For {account}, we are piecing together feedback from business users, IT, and leadership so the picture "
+            "matches what you care about: stable day-to-day use, clear reporting, and a path to roll out without "
+            "derailing your teams’ other priorities."
+        ),
+        (
+            "Conversations on the {account} side have highlighted both what is working in early use and where the "
+            "product still needs polish—especially around edge cases, permissions, and how new users get productive quickly."
+        ),
+        (
+            "We are tracking open items that matter for {account}’s evaluation: how issues are triaged, when fixes land, "
+            "and how we keep trial users unblocked so you can make a confident decision on timing and scope."
+        ),
     ]
 
     CONTACT_FIRST_NAMES = [
@@ -313,11 +335,119 @@ class DataGenerator:
         ]
         return random.choice(resolutions)
 
+    @staticmethod
+    def _trunc_opp(opp: str, max_len: int = 320) -> str:
+        t = " ".join((opp or "").split())
+        if not t:
+            return ""
+        if len(t) <= max_len:
+            return t
+        return t[: max_len - 1].rstrip() + "…"
+
+    def _product_line(self, acc: Optional[str]) -> str:
+        if acc:
+            return random.choice(self.PRODUCT_STORY_SNIPPETS_WITH_ACCOUNT).format(account=acc)
+        return random.choice(self.PRODUCT_STORY_SNIPPETS)
+
+    def _narrative_bridge(self, acc: Optional[str], opp: str) -> str:
+        """Weave account and deal text into the opening of the business paragraph."""
+        t = self._trunc_opp(opp, 300)
+        if acc and t:
+            return (
+                f"I am writing with {acc} top of mind; the situation you described "
+                f"({t}) is what the rest of this note is aligned to. "
+            )
+        if acc:
+            return (
+                f"Following our work with {acc}, the points below are framed for that account and this engagement. "
+            )
+        if t:
+            return f"Using the deal context you provided ({t}), here is the substance of my note. "
+        return ""
+
+    def _enrich_business_email_with_sf(
+        self, em: Dict, acc: Optional[str], opp: str
+    ) -> None:
+        """
+        When account and/or opportunity details are provided, align subject lines, project names,
+        and custom_message with that context (not generic boilerplate only).
+        """
+        if not acc and not (opp and opp.strip()):
+            return
+        t = self._trunc_opp(opp, 400)
+        em["salesforce_account"] = acc or ""
+        em["salesforce_opportunity_brief"] = t
+        o = self._narrative_bridge(acc, opp)
+        well = random.choice(self.PERSONAL_WELLBEING_SNIPPETS)
+        prod = self._product_line(acc)
+        et = em.get("type")
+        if et == "project_update":
+            if acc and t:
+                em["project_name"] = f"{acc} - {t[:70]}{'...' if len(t) > 70 else ''}"
+            elif acc:
+                em["project_name"] = f"Engagement with {acc}"
+            elif t:
+                em["project_name"] = t[:80] + ("..." if len(t) > 80 else "")
+            if acc:
+                em["subject"] = f"Project update - {acc}"
+            em["custom_message"] = (
+                f"{well} "
+                f"{o}"
+                f"From a delivery perspective, we are moving through the current milestone and planning the next steps "
+                f"so they stay consistent with your priorities for this opportunity. If resourcing, timelines, or other "
+                f"initiatives on your side could affect the plan, now is a good time to call that out. "
+                f"{prod}"
+            )
+        elif et == "meeting_invitation":
+            if acc:
+                ag = em.get("agenda") or ""
+                em["agenda"] = (
+                    f"Account focus: {acc}.\n{t[:500] if t else 'Align on open items and next steps.'}\n\n" + ag
+                )
+                em["subject"] = f"Meeting: {acc} - {em.get('meeting_title', 'check-in')}"
+            em["custom_message"] = (
+                f"{well} {o}We would like to use the time to walk through what matters for this account, "
+                f"clarify open items from the opportunity, and answer questions so the path forward is clear. {prod}"
+            )
+        elif et == "followup":
+            if acc:
+                em["context"] = f"our work with {acc}" + (f" ({t[:120]})" if t else "")
+            em["custom_message"] = (
+                f"{well} {o}I am following up to make sure you have what you need from us and to see if anything "
+                f"has shifted in your priorities. {prod}"
+            )
+        elif et == "thank_you":
+            if acc:
+                em["company"] = acc
+            thx = (
+                f"it genuinely helps us stay aligned with {acc}'s needs."
+                if acc
+                else "it genuinely helps us stay aligned with what you need from us."
+            )
+            em["custom_message"] = (
+                f"{well} {o}I wanted to say thank you for the time your team has invested in this evaluation; {thx} {prod}"
+            )
+        elif et == "reminder":
+            em["custom_message"] = (
+                f"{well} {o}This is a friendly nudge on the item below. If you are heads-down on other priorities or "
+                f"have time away from the office coming up, tell us and we can adjust dates. {prod}"
+            )
+        elif et in ("trial_feedback", "product_queries", "product_issues", "demo_enquiry"):
+            em["custom_message"] = (
+                f"{well} {o}"
+                f"The substance here is specific to how we are supporting you on this deal"
+                f"{f' with {acc}' if acc else ''}. {prod}"
+            )
+        else:
+            em["custom_message"] = f"{well} {o}{em.get('custom_message', '')}"
+
     def generate_business_emails(
         self,
         count: int,
         topic_types: Optional[List[str]] = None,
         salesforce_context: Optional[str] = None,
+        account_name: Optional[str] = None,
+        opportunity_brief: Optional[str] = None,
     ) -> List[Dict]:
         """
         Generate random business emails distributed across selected types.
@@ -325,7 +455,9 @@ class DataGenerator:
         Args:
             count: Total number of business emails to generate
             topic_types: If provided, only these types are used. If None or empty, all 9 types are used.
-            salesforce_context: Optional text (account + opportunity) prepended to each custom_message.
+            salesforce_context: Optional instruction text; if account_name/opportunity_brief are not set, prepended to custom_message.
+            account_name: When set, copy is aligned to this Salesforce account in the body (not just a header).
+            opportunity_brief: Combined opportunity text and file upload extract for narrative alignment.
 
         Returns:
             List of business email dictionaries with 'type' and 'data' keys
@@ -383,7 +515,14 @@ class DataGenerator:
         # Shuffle to mix types
         random.shuffle(emails)
 
-        if salesforce_context and salesforce_context.strip():
+        acc = (account_name or "").strip() or None
+        opp = (opportunity_brief or "").strip() or ""
+
+        if acc or opp:
+            for em in emails:
+                self._enrich_business_email_with_sf(em, acc, opp)
+        elif salesforce_context and salesforce_context.strip():
+            # Legacy: instruction-style block only (e.g. file context without structured account)
             prefix = salesforce_context.strip() + "\n\n"
             for em in emails:
                 if em.get("custom_message"):
