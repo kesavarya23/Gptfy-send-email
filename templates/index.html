@@ -321,6 +321,14 @@
             overflow: hidden;
             margin-bottom: 12px;
         }
+        .segment-control-wide {
+            display: flex;
+            flex-wrap: wrap;
+        }
+        .segment-control-wide .segment-option {
+            flex: 1 1 30%;
+            min-width: 100px;
+        }
         .segment-option {
             padding: 10px 24px;
             font-size: 14px;
@@ -403,17 +411,44 @@
                 <!-- Sender Information -->
                 <div class="form-section">
                     <h2>📤 Sender Information</h2>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 12px;">How do you want to send mail? Pick Gmail or Outlook to sign in (no app password). Or use SMTP with your email and app password.</p>
                     <div class="form-group">
-                        <label>Sender Email <span class="required">*</span></label>
-                        <input type="email" id="sender_email" required placeholder="your-email@gmail.com">
+                        <label>Send method</label>
+                        <div class="segment-control segment-control-wide">
+                            <button type="button" class="segment-option" data-send="gmail" id="segGmail">Gmail (OAuth)</button>
+                            <button type="button" class="segment-option" data-send="outlook" id="segOutlook">Outlook (OAuth)</button>
+                            <button type="button" class="segment-option active" data-send="smtp" id="segSmtp">SMTP (password)</button>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Sender Password (App Password) <span class="required">*</span></label>
-                        <input type="password" id="sender_password" required placeholder="Enter Gmail App Password">
+                    <div id="panelGmail" class="sender-panel" style="display: none;">
+                        <div class="info-box" id="gmailConfigHint" style="display: none;">
+                            <p>Google sign-in is not configured on the server. Add <code>GOOGLE_CLIENT_ID</code>, <code>GOOGLE_CLIENT_SECRET</code>, and <code>GOOGLE_OAUTH_REDIRECT</code> to the environment.</p>
+                        </div>
+                        <p id="gmailStatus" class="oauth-status" style="margin-bottom: 10px; color: #333;"></p>
+                        <a href="/api/auth/google" class="btn" id="linkConnectGoogle" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 20px; margin-right: 8px;">Connect Google</a>
+                        <button type="button" class="btn" id="btnDisconnectGmail" style="display: none; width: auto; padding: 10px 20px; background: #666;">Disconnect</button>
                     </div>
-                    <div class="form-group">
-                        <label>Sender Name</label>
-                        <input type="text" id="sender_name" placeholder="Your Name or Company Name">
+                    <div id="panelOutlook" class="sender-panel" style="display: none;">
+                        <div class="info-box" id="outlookConfigHint" style="display: none;">
+                            <p>Microsoft sign-in is not configured. Add <code>MICROSOFT_CLIENT_ID</code>, <code>MICROSOFT_CLIENT_SECRET</code>, and <code>MICROSOFT_OAUTH_REDIRECT</code> to the environment.</p>
+                        </div>
+                        <p id="outlookStatus" class="oauth-status" style="margin-bottom: 10px; color: #333;"></p>
+                        <a href="/api/auth/outlook" class="btn" id="linkConnectOutlook" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 20px; margin-right: 8px;">Connect Microsoft</a>
+                        <button type="button" class="btn" id="btnDisconnectOutlook" style="display: none; width: auto; padding: 10px 20px; background: #666;">Disconnect</button>
+                    </div>
+                    <div id="panelSmtp" class="sender-panel">
+                        <div class="form-group">
+                            <label>Sender Email <span class="required">*</span></label>
+                            <input type="email" id="sender_email" placeholder="your-email@gmail.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Sender Password (App Password) <span class="required">*</span></label>
+                            <input type="password" id="sender_password" placeholder="Enter Gmail / provider app password">
+                        </div>
+                        <div class="form-group">
+                            <label>Sender Name</label>
+                            <input type="text" id="sender_name" placeholder="Your Name or Company Name">
+                        </div>
                     </div>
                 </div>
 
@@ -423,6 +458,30 @@
                     <div class="form-group">
                         <label>Recipient Email <span class="required">*</span></label>
                         <input type="email" id="recipient_email" required placeholder="recipient@example.com">
+                    </div>
+                </div>
+
+                <!-- Optional Salesforce context -->
+                <div class="form-section">
+                    <h2>📋 Salesforce context (optional)</h2>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 10px;">Leave the box below unchecked to keep the current random business emails. Check it to align all generated copy with a real account and opportunity.</p>
+                    <label class="topic-checkbox-item" style="margin-bottom: 14px;">
+                        <input type="checkbox" id="useCustomSf"> Use custom Account &amp; Opportunity
+                    </label>
+                    <div id="sfContextPanel" style="display: none; padding: 12px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0;">
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label>Account name</label>
+                            <input type="text" id="sfAccount" placeholder="e.g. Acme Corporation" style="width: 100%;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 12px;">
+                            <label>Opportunity details (text)</label>
+                            <textarea id="sfOppText" rows="5" placeholder="Paste from Salesforce, email, or notes: stage, amount, contacts, next steps…" style="width: 100%; min-height: 100px;"></textarea>
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label>Or upload a file / screenshot</label>
+                            <input type="file" id="sfOppFile" accept=".txt,.md,.text,.png,.jpg,.jpeg,.gif,.webp" style="width: 100%;">
+                            <small style="color: #666; display: block; margin-top: 6px;">Supported: .txt, .md, or image (screenshot). Images use OCR when the server has Tesseract; otherwise add text above.</small>
+                        </div>
                     </div>
                 </div>
 
@@ -501,6 +560,79 @@
     </div>
 
     <script>
+        function getSendMethod() {
+            if (document.getElementById('segGmail').classList.contains('active')) return 'gmail';
+            if (document.getElementById('segOutlook').classList.contains('active')) return 'outlook';
+            return 'smtp';
+        }
+        function setSendMethodPanel(mode) {
+            document.getElementById('panelGmail').style.display = mode === 'gmail' ? 'block' : 'none';
+            document.getElementById('panelOutlook').style.display = mode === 'outlook' ? 'block' : 'none';
+            document.getElementById('panelSmtp').style.display = mode === 'smtp' ? 'block' : 'none';
+        }
+        function authStatusRefresh() {
+            fetch('/api/auth/status')
+                .then(r => r.json())
+                .then(s => {
+                    const gH = document.getElementById('gmailConfigHint');
+                    const oH = document.getElementById('outlookConfigHint');
+                    gH.style.display = s.google_configured ? 'none' : 'block';
+                    oH.style.display = s.microsoft_configured ? 'none' : 'block';
+                    const gS = document.getElementById('gmailStatus');
+                    const oS = document.getElementById('outlookStatus');
+                    gS.textContent = s.gmail_connected ? 'Connected: ' + s.gmail_email : 'Not connected';
+                    oS.textContent = s.outlook_connected ? 'Connected: ' + s.outlook_email : 'Not connected';
+                    document.getElementById('btnDisconnectGmail').style.display = s.gmail_connected ? 'inline-block' : 'none';
+                    document.getElementById('btnDisconnectOutlook').style.display = s.outlook_connected ? 'inline-block' : 'none';
+                    const gLink = document.getElementById('linkConnectGoogle');
+                    gLink.style.pointerEvents = s.google_configured ? 'auto' : 'none';
+                    gLink.style.opacity = s.google_configured ? '1' : '0.5';
+                    const oLink = document.getElementById('linkConnectOutlook');
+                    oLink.style.pointerEvents = s.microsoft_configured ? 'auto' : 'none';
+                    oLink.style.opacity = s.microsoft_configured ? '1' : '0.5';
+                })
+                .catch(function() {});
+        }
+        document.getElementById('btnDisconnectGmail').addEventListener('click', function() {
+            fetch('/api/auth/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'gmail' }) })
+                .then(function() { authStatusRefresh(); });
+        });
+        document.getElementById('btnDisconnectOutlook').addEventListener('click', function() {
+            fetch('/api/auth/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'outlook' }) })
+                .then(function() { authStatusRefresh(); });
+        });
+        document.getElementById('segGmail').addEventListener('click', function() {
+            document.getElementById('segGmail').classList.add('active');
+            document.getElementById('segOutlook').classList.remove('active');
+            document.getElementById('segSmtp').classList.remove('active');
+            setSendMethodPanel('gmail');
+        });
+        document.getElementById('segOutlook').addEventListener('click', function() {
+            document.getElementById('segOutlook').classList.add('active');
+            document.getElementById('segGmail').classList.remove('active');
+            document.getElementById('segSmtp').classList.remove('active');
+            setSendMethodPanel('outlook');
+        });
+        document.getElementById('segSmtp').addEventListener('click', function() {
+            document.getElementById('segSmtp').classList.add('active');
+            document.getElementById('segGmail').classList.remove('active');
+            document.getElementById('segOutlook').classList.remove('active');
+            setSendMethodPanel('smtp');
+        });
+        document.addEventListener('DOMContentLoaded', function() {
+            authStatusRefresh();
+            if (new URLSearchParams(window.location.search).get('gmail') === 'connected' || new URLSearchParams(window.location.search).get('gmail') === 'ok') {
+                setTimeout(function() { authStatusRefresh(); history.replaceState({}, document.title, '/'); }, 0);
+            }
+            if (new URLSearchParams(window.location.search).get('outlook') === 'connected' || new URLSearchParams(window.location.search).get('outlook') === 'ok') {
+                setTimeout(function() { authStatusRefresh(); history.replaceState({}, document.title, '/'); }, 0);
+            }
+            const u = document.getElementById('useCustomSf');
+            if (u) u.addEventListener('change', function() {
+                document.getElementById('sfContextPanel').style.display = this.checked ? 'block' : 'none';
+            });
+        });
+
         // Segment control: Default vs Custom
         document.getElementById('segmentDefault').addEventListener('click', function() {
             document.getElementById('segmentDefault').classList.add('active');
@@ -533,29 +665,60 @@
                 return;
             }
 
+            const sm = getSendMethod();
+            if (sm === 'smtp') {
+                const se = document.getElementById('sender_email').value.trim();
+                const sp = document.getElementById('sender_password').value;
+                if (!se || !sp) {
+                    document.getElementById('errorMessage').textContent = 'Please enter sender email and app password for SMTP, or choose Gmail/Outlook and connect.';
+                    document.getElementById('errorMessage').classList.add('show');
+                    return;
+                }
+            }
+
+            const numBiz = parseInt(document.getElementById('num_business').value) || 0;
+            const useSf = document.getElementById('useCustomSf').checked;
+            if (useSf && numBiz > 0) {
+                const acc = document.getElementById('sfAccount').value.trim();
+                const ot = document.getElementById('sfOppText').value.trim();
+                const f = document.getElementById('sfOppFile').files[0];
+                if (!acc && !ot && !f) {
+                    document.getElementById('errorMessage').textContent = 'Custom Salesforce context is on: add an account name, opportunity text, and/or a file.';
+                    document.getElementById('errorMessage').classList.add('show');
+                    return;
+                }
+            }
+
             // Show loading
             document.getElementById('loading').style.display = 'block';
             document.getElementById('submitBtn').disabled = true;
 
-            // Get form data
-            const formData = {
-                sender_email: document.getElementById('sender_email').value,
-                sender_password: document.getElementById('sender_password').value,
-                sender_name: document.getElementById('sender_name').value,
-                recipient_email: document.getElementById('recipient_email').value,
-                num_business: parseInt(document.getElementById('num_business').value) || 0,
-                delay_seconds: parseInt(document.getElementById('delay_seconds').value) || 0,
-                topic_mode: topicMode,
-                selected_topics: topicMode === 'custom' ? selectedTopics : []
-            };
+            const formData = new FormData();
+            formData.append('send_method', getSendMethod());
+            formData.append('sender_email', document.getElementById('sender_email').value);
+            formData.append('sender_password', document.getElementById('sender_password').value);
+            formData.append('sender_name', document.getElementById('sender_name').value);
+            formData.append('recipient_email', document.getElementById('recipient_email').value);
+            formData.append('num_business', String(numBiz));
+            formData.append('num_opportunities', '0');
+            formData.append('num_cases', '0');
+            formData.append('delay_seconds', String(parseInt(document.getElementById('delay_seconds').value) || 0));
+            formData.append('topic_mode', topicMode);
+            if (topicMode === 'custom') {
+                selectedTopics.forEach(function (t) { formData.append('selected_topics', t); });
+            }
+            formData.append('use_custom_context', useSf ? 'true' : 'false');
+            formData.append('account_name', document.getElementById('sfAccount').value);
+            formData.append('opportunity_text', document.getElementById('sfOppText').value);
+            const upFile = document.getElementById('sfOppFile').files[0];
+            if (upFile) {
+                formData.append('opportunity_file', upFile);
+            }
 
             try {
                 const response = await fetch('/send_emails', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(formData)
+                    body: formData
                 });
 
                 const result = await response.json();
