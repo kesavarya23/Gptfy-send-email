@@ -199,10 +199,18 @@ def send_emails():
         data_generator = DataGenerator()
         agent = None
         if send_method == 'smtp':
+            # Use SMTP_HOST / SMTP_PORT so Microsoft 365 / Outlook.com can use the right server (not Gmail’s default).
+            _smtp_host = os.getenv("SMTP_HOST", "smtp.gmail.com")
+            try:
+                _smtp_port = int(os.getenv("SMTP_PORT", "587") or 587)
+            except ValueError:
+                _smtp_port = 587
             agent = EmailAgent(
                 sender_email=sender_email,
                 sender_password=sender_password,
-                sender_name=sender_name
+                sender_name=sender_name,
+                smtp_host=_smtp_host,
+                smtp_port=_smtp_port,
             )
         email_generator = EmailGenerator()
 
