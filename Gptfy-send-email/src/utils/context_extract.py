@@ -44,6 +44,7 @@ def extract_text_from_upload(file_storage) -> str:
         return raw.decode("utf-8", errors="replace")[:MAX_TEXT].strip()
 
     if ext in ALLOWED_IMAGE:
+        # Never inject technical/OCR error strings into email context (use text area instead).
         return _ocr_image_bytes(raw)[:MAX_IMAGE_TEXT].strip()
 
     logger.warning("Unsupported file type for context: %s", name)
@@ -51,16 +52,21 @@ def extract_text_from_upload(file_storage) -> str:
 
 
 def _ocr_image_bytes(data: bytes) -> str:
+    """
+    Return extracted text or empty string. On failure, return "" so the UI text box
+    (Account / Opportunity details) remains the only source of truth—never embed
+    Tesseract error messages into generated emails.
+    """
     try:
         from PIL import Image
         import pytesseract
         if os.getenv("TESSERACT_CMD"):
             pytesseract.pytesseract.tesseract_cmd = os.environ["TESSERACT_CMD"]
     except ImportError:
-        return (
-            "[Image uploaded but OCR is not available on the server. "
-            "Add opportunity details in the text box, or install Pillow, pytesseract, and the Tesseract binary.]"
+        logger.warning(
+            "OCR skipped: PIL/pytesseract not available. Add opportunity text manually or install OCR."
         )
+        return ""
 
     try:
         im = Image.open(io.BytesIO(data))
@@ -68,11 +74,12 @@ def _ocr_image_bytes(data: bytes) -> str:
         text = pytesseract.image_to_string(im) or ""
         im.close()
         if not text.strip():
-            return "[Image processed but no text was detected. Add details in the text area.]"
+            logger.info("OCR returned no text from image; user should add details in the text area.")
+            return ""
         return text
     except Exception as e:
         logger.warning("OCR failed: %s", e)
-        return f"[Could not read image text. Paste details in the text box. ({e})]"
+        return ""
 
 
 def build_salesforce_context(

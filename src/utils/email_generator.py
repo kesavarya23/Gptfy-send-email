@@ -282,11 +282,13 @@ class EmailGenerator:
                     lines.append(
                         f"This is a quick update on the \"{template_data.get('project_name', 'project')}\" work."
                     )
+                comp = template_data.get("completion", "N/A")
+                comp_s = "see narrative" if comp is None else f"{comp}%"
                 lines.append("")
                 lines.append(
                     f"At a glance — project: {template_data.get('project_name', 'N/A')}; "
                     f"milestone: {template_data.get('milestone', 'N/A')}; "
-                    f"completion: {template_data.get('completion', 'N/A')}%; "
+                    f"completion: {comp_s}; "
                     f"status: {template_data.get('status', 'N/A')}"
                 )
                 custom_message = ""

@@ -398,6 +398,18 @@ class DataGenerator:
                 f"initiatives on your side could affect the plan, now is a good time to call that out. "
                 f"{prod}"
             )
+            # Replace random template fields (e.g. "DevOps Setup", 85% complete) with SF-aligned values.
+            if t:
+                em["milestone"] = (t[:200] + "…") if len(t) > 200 else t
+            elif acc:
+                em["milestone"] = f"Active opportunity — {acc}"
+            em["next_milestone"] = (
+                "Align on stage, amount, and close plan; confirm next steps with stakeholders."
+            )
+            em["status"] = "In progress"
+            em["completion"] = None
+            if acc or t:
+                em["manager"] = f"Engagement team ({acc})" if acc else "Engagement team"
         elif et == "meeting_invitation":
             if acc:
                 ag = em.get("agenda") or ""
@@ -433,6 +445,19 @@ class DataGenerator:
                 f"have time away from the office coming up, tell us and we can adjust dates. {prod}"
             )
         elif et in ("trial_feedback", "product_queries", "product_issues", "demo_enquiry"):
+            if acc:
+                em["title"] = f"Product conversation — {acc}"
+            elif t:
+                em["title"] = "Product demo — your opportunity"
+            if t:
+                em["message"] = (
+                    "Thank you for your interest. We are aligning this note with the opportunity "
+                    f"details you shared: {t[:300]}{'…' if len(t) > 300 else ''}"
+                )
+            elif acc:
+                em["message"] = (
+                    f"Thank you for your interest. We would be glad to arrange a session focused on {acc}."
+                )
             em["custom_message"] = (
                 f"{well} {o}"
                 f"The substance here is specific to how we are supporting you on this deal"
