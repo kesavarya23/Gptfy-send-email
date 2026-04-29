@@ -109,11 +109,12 @@
 
             <div class="detail-row">
                 <span class="label">Status:</span>
-                <span class="status-badge {% if status == 'On Track' %}on-track{% elif status == 'Ahead of Schedule' %}ahead{% else %}attention{% endif %}">
+                <span class="status-badge {% if status == 'On Track' %}on-track{% elif status == 'Ahead of Schedule' %}ahead{% elif status == 'In progress' %}on-track{% else %}attention{% endif %}">
                     {{ status }}
                 </span>
             </div>
 
+            {% if completion is not none %}
             <div style="margin: 20px 0;">
                 <span class="label">Overall Completion:</span>
                 <div class="progress-bar">
@@ -122,6 +123,12 @@
                     </div>
                 </div>
             </div>
+            {% else %}
+            <div class="detail-row">
+                <span class="label">Progress:</span>
+                Not estimated here — use the account and opportunity context in the update above (avoiding a generic %).
+            </div>
+            {% endif %}
 
             {% if next_milestone %}
             <div class="detail-row">
