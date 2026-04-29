@@ -10,6 +10,7 @@ import secrets
 import os
 import time
 import urllib.parse
+import re
 import requests
 sys.path.append('src')
 
@@ -35,11 +36,17 @@ CORS(app)  # Enable CORS for all routes
 def _do_send_email(
     send_method: str,
     agent,
-    to_email: str,
+    to_list: list,
     subject: str,
     html_content: str,
     plain_text: str,
+    cc: list = None,
+    bcc: list = None,
 ) -> bool:
+    if not to_list:
+        return False
+    cc = list(cc or [])
+    bcc = list(bcc or [])
     if send_method == "gmail":
         cid = os.getenv("GOOGLE_CLIENT_ID", "")
         cs = os.getenv("GOOGLE_CLIENT_SECRET", "")
@@ -47,7 +54,10 @@ def _do_send_email(
         from_addr = session.get("google_email", "")
         if not (cid and cs and rt and from_addr):
             return False
-        return send_gmail(cid, cs, rt, from_addr, to_email, subject, plain_text, html_content)
+        return send_gmail(
+            cid, cs, rt, from_addr, to_list, subject, plain_text, html_content,
+            cc=cc, bcc=bcc,
+        )
     if send_method == "outlook":
         rt = session.get("microsoft_refresh_token")
         if not rt:
@@ -55,14 +65,20 @@ def _do_send_email(
         at = get_microsoft_access_token(rt)
         if not at:
             return False
-        return send_outlook(at, to_email, subject, plain_text)
+        return send_outlook(
+            at, to_list, subject, plain_text,
+            html=html_content,
+            cc=cc, bcc=bcc,
+        )
     if agent is None:
         return False
     return agent.email_service.send_email(
-        to_email=to_email,
+        to_email=to_list,
         subject=subject,
         html_content=html_content,
         plain_text=plain_text,
+        cc=cc,
+        bcc=bcc,
     )
 
 
@@ -74,6 +90,18 @@ def _as_bool(v):
     return str(v).lower() in ("true", "1", "yes", "on")
 
 
+def _parse_email_list(value) -> list:
+    """Parse comma, semicolon, or newline–separated addresses from a string or list."""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(x).strip() for x in value if str(x).strip()]
+    s = str(value).strip()
+    if not s:
+        return []
+    return [p.strip() for p in re.split(r"[\s,;]+", s.replace("\r", "").replace("\n", " ")) if p.strip()]
+
+
 def _parse_send_payload():
     """Parse JSON or multipart/form-data (file upload for opportunity context)."""
     if request.content_type and "multipart/form-data" in request.content_type:
@@ -83,6 +111,9 @@ def _parse_send_payload():
             "sender_password": f.get("sender_password") or "",
             "sender_name": f.get("sender_name") or "",
             "recipient_email": f.get("recipient_email") or "",
+            "to_emails": f.get("to_emails") or f.get("recipient_to") or "",
+            "cc_emails": f.get("cc_emails") or "",
+            "bcc_emails": f.get("bcc_emails") or "",
             "num_opportunities": f.get("num_opportunities", 0),
             "num_cases": f.get("num_cases", 0),
             "num_business": f.get("num_business", 0),
@@ -99,6 +130,9 @@ def _parse_send_payload():
         }
         return data, request.files.get("opportunity_file")
     data = request.get_json() or {}
+    data.setdefault("to_emails", data.get("recipient_to") or data.get("to_emails") or "")
+    data.setdefault("cc_emails", data.get("cc_emails") or "")
+    data.setdefault("bcc_emails", data.get("bcc_emails") or "")
     st = data.get("selected_topics")
     if st is None:
         data["selected_topics"] = []
@@ -126,7 +160,14 @@ def send_emails():
         sender_email = data.get("sender_email")
         sender_password = data.get("sender_password")
         sender_name = data.get("sender_name", sender_email)
-        recipient_email = data.get("recipient_email")
+        to_list = _parse_email_list(
+            data.get("to_emails")
+            or data.get("recipient_to")
+            or data.get("recipient_email")
+            or "",
+        )
+        cc_list = _parse_email_list(data.get("cc_emails") or data.get("cc") or "")
+        bcc_list = _parse_email_list(data.get("bcc_emails") or data.get("bcc") or "")
         num_opportunities = int(data.get("num_opportunities", 0) or 0)
         num_cases = int(data.get("num_cases", 0) or 0)
         num_business = int(data.get("num_business", 0) or 0)
@@ -150,10 +191,10 @@ def send_emails():
             delay_seconds = 0
 
         # Validation
-        if not recipient_email:
+        if not to_list:
             return jsonify({
                 'success': False,
-                'error': 'Please fill in recipient email'
+                'error': 'Please add at least one address in To (use comma, semicolon, or new lines between multiple emails)',
             })
         if send_method == 'smtp':
             if not sender_email or not sender_password:
@@ -229,9 +270,10 @@ def send_emails():
                     )
 
                     success = _do_send_email(
-                        send_method, agent, recipient_email,
+                        send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
+                        cc=cc_list, bcc=bcc_list,
                     )
 
                     all_emails.append({
@@ -266,9 +308,10 @@ def send_emails():
                     )
 
                     success = _do_send_email(
-                        send_method, agent, recipient_email,
+                        send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
+                        cc=cc_list, bcc=bcc_list,
                     )
 
                     all_emails.append({
@@ -313,9 +356,10 @@ def send_emails():
                     email_content = email_generator.generate_business_email(business_email)
 
                     success = _do_send_email(
-                        send_method, agent, recipient_email,
+                        send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
+                        cc=cc_list, bcc=bcc_list,
                     )
 
                     # Friendly type names
