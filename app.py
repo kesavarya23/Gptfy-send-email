@@ -125,6 +125,9 @@ def _parse_send_payload():
             "use_custom_context": str(f.get("use_custom_context", "")).lower() in (
                 "true", "1", "on", "yes",
             ),
+            "strict_sf_context": str(f.get("strict_sf_context", "")).lower() in (
+                "true", "1", "on", "yes",
+            ),
             "account_name": f.get("account_name") or "",
             "opportunity_text": f.get("opportunity_text") or "",
         }
@@ -139,6 +142,7 @@ def _parse_send_payload():
     elif not isinstance(st, list):
         data["selected_topics"] = [st] if st else []
     data["use_custom_context"] = _as_bool(data.get("use_custom_context"))
+    data["strict_sf_context"] = _as_bool(data.get("strict_sf_context", False))
     data["account_name"] = data.get("account_name") or ""
     data["opportunity_text"] = data.get("opportunity_text") or ""
     return data, None
@@ -178,6 +182,7 @@ def send_emails():
         if send_method not in ("smtp", "gmail", "outlook"):
             send_method = "smtp"
         use_custom_context = _as_bool(data.get("use_custom_context"))
+        strict_sf = _as_bool(data.get("strict_sf_context")) and use_custom_context
         salesforce_context = build_salesforce_context(
             use_custom_context,
             data.get("account_name") or "",
@@ -349,6 +354,7 @@ def send_emails():
                 salesforce_context=salesforce_context,
                 account_name=acc_for_gen,
                 opportunity_brief=opp_combined or None,
+                strict_sf_context=strict_sf,
             )
 
             for i, business_email in enumerate(business_emails, 1):
