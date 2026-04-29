@@ -4,8 +4,9 @@ Send email via Google Gmail API and Microsoft Graph (no SMTP app password).
 import base64
 import logging
 import os
+import re
 from email.message import EmailMessage
-from typing import Optional
+from typing import List, Optional, Sequence, Union
 
 import requests
 
@@ -57,15 +58,38 @@ def get_microsoft_user_email(access_token: str) -> str:
     return d.get("userPrincipalName") or d.get("mail") or d.get("email", "")
 
 
+def _addr_list(
+    *parts: Optional[Union[str, Sequence[str]]]
+) -> List[str]:
+    out: List[str] = []
+    for p in parts:
+        if p is None:
+            continue
+        if isinstance(p, (list, tuple)):
+            for x in p:
+                out.extend(_addr_list((x,)))
+        else:
+            s = str(p).strip()
+            if not s:
+                continue
+            for chunk in re.split(r"[\s,;]+", s.replace("\n", " ")):
+                t = chunk.strip()
+                if t:
+                    out.append(t)
+    return out
+
+
 def send_gmail(
     client_id: str,
     client_secret: str,
     refresh_token: str,
     from_addr: str,
-    to: str,
+    to: Union[str, List[str]],
     subject: str,
     plain: str,
     html: Optional[str] = None,
+    cc: Optional[List[str]] = None,
+    bcc: Optional[List[str]] = None,
 ) -> bool:
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
@@ -82,8 +106,17 @@ def send_gmail(
     creds.refresh(Request())
     service = build("gmail", "v1", credentials=creds, cache_discovery=False)
 
+    to_list = _addr_list(to)
+    if not to_list:
+        return False
+    cc = _addr_list(cc)
+    bcc = _addr_list(bcc)
     msg = EmailMessage()
-    msg["To"] = to
+    msg["To"] = ", ".join(to_list)
+    if cc:
+        msg["Cc"] = ", ".join(cc)
+    if bcc:
+        msg["Bcc"] = ", ".join(bcc)
     msg["From"] = from_addr
     msg["Subject"] = subject
     if html:
@@ -100,15 +133,35 @@ def send_gmail(
         return False
 
 
-def send_outlook(access_token: str, to: str, subject: str, plain: str) -> bool:
+def send_outlook(
+    access_token: str,
+    to: Union[str, List[str]],
+    subject: str,
+    plain: str,
+    html: Optional[str] = None,
+    cc: Optional[List[str]] = None,
+    bcc: Optional[List[str]] = None,
+) -> bool:
+    to_list = _addr_list(to)
+    if not to_list:
+        return False
+    cc = _addr_list(cc)
+    bcc = _addr_list(bcc)
     url = "https://graph.microsoft.com/v1.0/me/sendMail"
-    body = {
-        "message": {
-            "subject": subject,
-            "body": {"contentType": "Text", "content": plain},
-            "toRecipients": [{"emailAddress": {"address": to}}],
-        }
+    use_html = bool(html and str(html).strip())
+    message: dict = {
+        "subject": subject,
+        "body": {
+            "contentType": "HTML" if use_html else "Text",
+            "content": (html if use_html else plain) or plain,
+        },
+        "toRecipients": [{"emailAddress": {"address": a}} for a in to_list],
     }
+    if cc:
+        message["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc]
+    if bcc:
+        message["bccRecipients"] = [{"emailAddress": {"address": a}} for a in bcc]
+    body = {"message": message}
     r = requests.post(
         url,
         headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},

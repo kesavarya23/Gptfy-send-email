@@ -82,6 +82,19 @@
             transition: all 0.3s;
         }
 
+        .form-group textarea.recipient-emails {
+            min-height: 72px;
+            font-family: inherit;
+            line-height: 1.4;
+        }
+
+        .field-hint {
+            color: #666;
+            font-size: 12px;
+            margin-top: 6px;
+            display: block;
+        }
+
         .form-group input:focus,
         .form-group textarea:focus {
             outline: none;
@@ -454,10 +467,22 @@
 
                 <!-- Recipient Information -->
                 <div class="form-section">
-                    <h2>📥 Recipient Information</h2>
+                    <h2>📥 Recipients</h2>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 12px;">To is required. Add multiple addresses with commas, semicolons, or one per line. CC and BCC are optional.</p>
                     <div class="form-group">
-                        <label>Recipient Email <span class="required">*</span></label>
-                        <input type="email" id="recipient_email" required placeholder="recipient@example.com">
+                        <label for="to_emails">To <span class="required">*</span></label>
+                        <textarea id="to_emails" class="recipient-emails" rows="3" required placeholder="alice@example.com, bob@example.com"></textarea>
+                        <span class="field-hint">At least one email. Multiple: comma, semicolon, or new line.</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="cc_emails">CC</label>
+                        <textarea id="cc_emails" class="recipient-emails" rows="2" placeholder="cc1@example.com, cc2@example.com"></textarea>
+                        <span class="field-hint">Optional carbon copies (multiple allowed).</span>
+                    </div>
+                    <div class="form-group">
+                        <label for="bcc_emails">BCC</label>
+                        <textarea id="bcc_emails" class="recipient-emails" rows="2" placeholder="hidden@example.com"></textarea>
+                        <span class="field-hint">Optional blind copies; addresses are not shown to other recipients.</span>
                     </div>
                 </div>
 
@@ -676,6 +701,13 @@
                 }
             }
 
+            const toRaw = document.getElementById('to_emails').value.trim();
+            if (!toRaw) {
+                document.getElementById('errorMessage').textContent = 'Please add at least one address in the To field.';
+                document.getElementById('errorMessage').classList.add('show');
+                return;
+            }
+
             const numBiz = parseInt(document.getElementById('num_business').value) || 0;
             const useSf = document.getElementById('useCustomSf').checked;
             if (useSf && numBiz > 0) {
@@ -698,7 +730,9 @@
             formData.append('sender_email', document.getElementById('sender_email').value);
             formData.append('sender_password', document.getElementById('sender_password').value);
             formData.append('sender_name', document.getElementById('sender_name').value);
-            formData.append('recipient_email', document.getElementById('recipient_email').value);
+            formData.append('to_emails', document.getElementById('to_emails').value);
+            formData.append('cc_emails', document.getElementById('cc_emails').value);
+            formData.append('bcc_emails', document.getElementById('bcc_emails').value);
             formData.append('num_business', String(numBiz));
             formData.append('num_opportunities', '0');
             formData.append('num_cases', '0');
