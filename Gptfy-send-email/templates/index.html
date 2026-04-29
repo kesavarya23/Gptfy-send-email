@@ -494,6 +494,9 @@
                         <input type="checkbox" id="useCustomSf"> Use custom Account &amp; Opportunity
                     </label>
                     <div id="sfContextPanel" style="display: none; padding: 12px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0;">
+                        <label class="topic-checkbox-item" style="margin-bottom: 12px;">
+                            <input type="checkbox" id="sfStrictContext" checked> <strong>Strict context only</strong> — use my Account + Opportunity text only (no random “wellbeing” or product filler paragraphs)
+                        </label>
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label>Account name</label>
                             <input type="text" id="sfAccount" placeholder="e.g. Acme Corporation" style="width: 100%;">
@@ -742,6 +745,7 @@
                 selectedTopics.forEach(function (t) { formData.append('selected_topics', t); });
             }
             formData.append('use_custom_context', useSf ? 'true' : 'false');
+            formData.append('strict_sf_context', (useSf && document.getElementById('sfStrictContext').checked) ? 'true' : 'false');
             formData.append('account_name', document.getElementById('sfAccount').value);
             formData.append('opportunity_text', document.getElementById('sfOppText').value);
             const upFile = document.getElementById('sfOppFile').files[0];

@@ -365,22 +365,92 @@ class DataGenerator:
             return f"Using the deal context you provided ({t}), here is the substance of my note. "
         return ""
 
+    def _strict_only_block(self, acc: Optional[str], opp: str) -> str:
+        """
+        User-provided text only: no template filler. Opportunity text can be long (e.g. pasted from Salesforce).
+        """
+        raw = (opp or "").strip()
+        if len(raw) > 12000:
+            raw = raw[:11999].rstrip() + "…"
+        parts: List[str] = []
+        if (acc or "").strip():
+            parts.append(f"Account: {acc.strip()}")
+        if raw:
+            parts.append("Opportunity / deal context (from you):\n" + raw)
+        return "\n\n".join(parts)
+
     def _enrich_business_email_with_sf(
-        self, em: Dict, acc: Optional[str], opp: str
+        self, em: Dict, acc: Optional[str], opp: str, strict: bool = False
     ) -> None:
         """
         When account and/or opportunity details are provided, align subject lines, project names,
         and custom_message with that context (not generic boilerplate only).
+
+        If strict is True, omit random wellbeing/productStory filler; body is only the user's
+        account and opportunity text plus a one-line type label.
         """
         if not acc and not (opp and opp.strip()):
             return
         t = self._trunc_opp(opp, 400)
         em["salesforce_account"] = acc or ""
         em["salesforce_opportunity_brief"] = t
+        et = em.get("type")
+
+        if strict:
+            block = self._strict_only_block(acc, opp)
+            if et == "project_update":
+                if acc and t:
+                    em["project_name"] = f"{acc} - {t[:70]}{'...' if len(t) > 70 else ''}"
+                elif acc:
+                    em["project_name"] = f"Engagement with {acc}"
+                elif t:
+                    em["project_name"] = t[:80] + ("..." if len(t) > 80 else "")
+                if acc:
+                    em["subject"] = f"Project update - {acc}"
+                em["custom_message"] = (
+                    "Project update — based only on the account and opportunity details you provided (no auto filler).\n\n"
+                    + block
+                )
+                if t:
+                    em["milestone"] = (t[:200] + "…") if len(t) > 200 else t
+                elif acc:
+                    em["milestone"] = f"Active opportunity — {acc}"
+                em["next_milestone"] = (
+                    "Next steps: confirm stage, value, and dates with your team as appropriate."
+                )
+                em["status"] = "In progress"
+                em["completion"] = None
+                em["manager"] = f"Engagement team ({acc})" if acc else "Engagement team"
+            elif et == "meeting_invitation":
+                if acc:
+                    ag = em.get("agenda") or ""
+                    em["agenda"] = block + ("\n\n" + ag if ag else "")
+                    em["subject"] = f"Meeting: {acc} - {em.get('meeting_title', 'check-in')}"
+                em["custom_message"] = "Meeting context — your Salesforce details only:\n\n" + block
+            elif et == "followup":
+                if acc:
+                    em["context"] = f"our work with {acc}" + (f" ({t[:120]})" if t else "")
+                em["custom_message"] = "Follow-up — context you provided:\n\n" + block
+            elif et == "thank_you":
+                if acc:
+                    em["company"] = acc
+                em["custom_message"] = "Thank you — reflecting the context you shared:\n\n" + block
+            elif et == "reminder":
+                em["custom_message"] = "Reminder — details from your context:\n\n" + block
+            elif et in ("trial_feedback", "product_queries", "product_issues", "demo_enquiry"):
+                if acc:
+                    em["title"] = f"Product / demo — {acc}"
+                elif t:
+                    em["title"] = "Product / demo — your opportunity"
+                em["message"] = "Please use the following information from your context."
+                em["custom_message"] = "Context you provided (no additional marketing filler):\n\n" + block
+            else:
+                em["custom_message"] = block
+            return
+
         o = self._narrative_bridge(acc, opp)
         well = random.choice(self.PERSONAL_WELLBEING_SNIPPETS)
         prod = self._product_line(acc)
-        et = em.get("type")
         if et == "project_update":
             if acc and t:
                 em["project_name"] = f"{acc} - {t[:70]}{'...' if len(t) > 70 else ''}"
@@ -473,6 +543,7 @@ class DataGenerator:
         salesforce_context: Optional[str] = None,
         account_name: Optional[str] = None,
         opportunity_brief: Optional[str] = None,
+        strict_sf_context: bool = False,
     ) -> List[Dict]:
         """
         Generate random business emails distributed across selected types.
@@ -483,6 +554,7 @@ class DataGenerator:
             salesforce_context: Optional instruction text; if account_name/opportunity_brief are not set, prepended to custom_message.
             account_name: When set, copy is aligned to this Salesforce account in the body (not just a header).
             opportunity_brief: Combined opportunity text and file upload extract for narrative alignment.
+            strict_sf_context: If True, do not add random wellbeing/product filler; body uses only user account + opportunity text.
 
         Returns:
             List of business email dictionaries with 'type' and 'data' keys
@@ -545,12 +617,19 @@ class DataGenerator:
 
         if acc or opp:
             for em in emails:
-                self._enrich_business_email_with_sf(em, acc, opp)
+                self._enrich_business_email_with_sf(
+                    em, acc, opp, strict=bool(strict_sf_context)
+                )
         elif salesforce_context and salesforce_context.strip():
             # Legacy: instruction-style block only (e.g. file context without structured account)
             prefix = salesforce_context.strip() + "\n\n"
             for em in emails:
-                if em.get("custom_message"):
+                if strict_sf_context:
+                    em["custom_message"] = (
+                        "Context you provided (strict — no template filler):\n\n"
+                        + salesforce_context.strip()
+                    )
+                elif em.get("custom_message"):
                     em["custom_message"] = prefix + em["custom_message"]
                 else:
                     em["custom_message"] = salesforce_context.strip()
