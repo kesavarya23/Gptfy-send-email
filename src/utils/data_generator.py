@@ -379,6 +379,108 @@ class DataGenerator:
             parts.append("Opportunity / deal context (from you):\n" + raw)
         return "\n\n".join(parts)
 
+    def _context_bullets_and_narrative(
+        self, acc: Optional[str], opp: str
+    ) -> tuple:
+        """
+        Formats user context as bullet lines when pasted as multiple lines, otherwise
+        a single narrative block. Returns (bullet_lines, narrative_text_or_empty).
+        """
+        accs = (acc or "").strip()
+        o = (opp or "").strip()
+        if not o and not accs:
+            return [], ""
+        if not o and accs:
+            return [f"Account: {accs}"], ""
+        lines = [ln.strip() for ln in o.splitlines() if ln.strip()]
+        if accs and not any(ln.lower().startswith("account:") for ln in lines[:5]):
+            lines.insert(0, f"Account: {accs}")
+        if len(lines) >= 2:
+            return lines[:30], ""
+        if len(lines) == 1 and len(lines[0]) < 500 and "\n" not in o:
+            return [lines[0]], ""
+        return [], o
+
+    def _apply_professional_strict_template(
+        self, em: Dict, acc: Optional[str], opp: str, et: str
+    ) -> None:
+        """
+        Fills a single professional (sample-style) layout: greeting, account, key details as
+        bullets or a narrative block, sign-off. No auto filler, no system instructions in body.
+        """
+        bullets, narr = self._context_bullets_and_narrative(acc, opp)
+        t = self._trunc_opp(opp, 400)
+        em["use_professional_context_template"] = True
+        em["strict_context_only"] = True
+        em["account_display"] = (acc or "").strip()
+        em["context_bullets"] = bullets
+        em["opportunity_narrative"] = narr
+        if not em["context_bullets"] and not em["opportunity_narrative"] and (acc or "").strip():
+            em["context_bullets"] = [f"Account: {acc.strip()}"]
+
+        em["email_purpose"] = {
+            "project_update": "Project update",
+            "meeting_invitation": "Meeting proposal",
+            "followup": "Follow-up",
+            "thank_you": "Thank you",
+            "reminder": "Reminder",
+            "trial_feedback": "Product trial",
+            "product_queries": "Product questions",
+            "product_issues": "Product issues",
+            "demo_enquiry": "Product / demo",
+        }.get(et, "Message")
+
+        em["lead_in"] = {
+            "project_update": "A concise, professional update structured from the details you entered below.",
+            "meeting_invitation": "A proposed focus for a conversation, based on the context you provided.",
+            "followup": "A short follow-up using your account and deal context.",
+            "thank_you": "A short thank-you that reflects the context you shared.",
+            "reminder": "A brief reminder that references the details you entered.",
+            "trial_feedback": "A note on your product trial, tied to the context you supplied.",
+            "product_queries": "A response-oriented note based on your product questions in context.",
+            "product_issues": "An update on product issues, aligned with your context.",
+            "demo_enquiry": "A product or demo request based on the opportunity you described.",
+        }.get(et, "Based on the details you provided.")
+
+        em["opening_paragraph"] = (
+            "I am writing with a single, clear message so we stay aligned. "
+            "The substance below is drawn from the information you provided—no additional marketing or filler has been added."
+        )
+        em["custom_message"] = ""
+
+        if et == "project_update":
+            if acc and t:
+                em["project_name"] = f"{acc} - {t[:70]}{'...' if len(t) > 70 else ''}"
+            elif acc:
+                em["project_name"] = f"Engagement with {acc}"
+            elif t:
+                em["project_name"] = t[:80] + ("..." if len(t) > 80 else "")
+            if (acc or "").strip():
+                em["subject"] = f"Project update - {acc.strip()}"
+            if t and not (acc or "").strip():
+                em["milestone"] = t[:200] if len(t) > 200 else t
+        elif et == "meeting_invitation":
+            if (acc or "").strip():
+                ag = em.get("agenda") or ""
+                ag_ctx = f"\n\n{ag}" if ag else ""
+                em["agenda"] = f"Context from you:\n{(opp or '').strip() or '—'}" + ag_ctx
+                em["subject"] = f"Meeting: {acc} - {em.get('meeting_title', 'check-in')}"
+        elif et == "followup" and (acc or "").strip():
+            em["context"] = f"our work with {acc}" + (f" ({t})" if t else "")
+        elif et == "thank_you" and (acc or "").strip():
+            em["company"] = acc
+        elif et in (
+            "trial_feedback",
+            "product_queries",
+            "product_issues",
+            "demo_enquiry",
+        ):
+            if (acc or "").strip():
+                em["title"] = f"{em['email_purpose']} — {acc}"
+            em["message"] = (
+                f"We are replying in line with the opportunity and account information below."
+            )
+
     def _enrich_business_email_with_sf(
         self, em: Dict, acc: Optional[str], opp: str, strict: bool = False
     ) -> None:
@@ -397,55 +499,7 @@ class DataGenerator:
         et = em.get("type")
 
         if strict:
-            block = self._strict_only_block(acc, opp)
-            if et == "project_update":
-                if acc and t:
-                    em["project_name"] = f"{acc} - {t[:70]}{'...' if len(t) > 70 else ''}"
-                elif acc:
-                    em["project_name"] = f"Engagement with {acc}"
-                elif t:
-                    em["project_name"] = t[:80] + ("..." if len(t) > 80 else "")
-                if acc:
-                    em["subject"] = f"Project update - {acc}"
-                em["custom_message"] = (
-                    "Project update — based only on the account and opportunity details you provided (no auto filler).\n\n"
-                    + block
-                )
-                if t:
-                    em["milestone"] = (t[:200] + "…") if len(t) > 200 else t
-                elif acc:
-                    em["milestone"] = f"Active opportunity — {acc}"
-                em["next_milestone"] = (
-                    "Next steps: confirm stage, value, and dates with your team as appropriate."
-                )
-                em["status"] = "In progress"
-                em["completion"] = None
-                em["manager"] = f"Engagement team ({acc})" if acc else "Engagement team"
-            elif et == "meeting_invitation":
-                if acc:
-                    ag = em.get("agenda") or ""
-                    em["agenda"] = block + ("\n\n" + ag if ag else "")
-                    em["subject"] = f"Meeting: {acc} - {em.get('meeting_title', 'check-in')}"
-                em["custom_message"] = "Meeting context — your Salesforce details only:\n\n" + block
-            elif et == "followup":
-                if acc:
-                    em["context"] = f"our work with {acc}" + (f" ({t[:120]})" if t else "")
-                em["custom_message"] = "Follow-up — context you provided:\n\n" + block
-            elif et == "thank_you":
-                if acc:
-                    em["company"] = acc
-                em["custom_message"] = "Thank you — reflecting the context you shared:\n\n" + block
-            elif et == "reminder":
-                em["custom_message"] = "Reminder — details from your context:\n\n" + block
-            elif et in ("trial_feedback", "product_queries", "product_issues", "demo_enquiry"):
-                if acc:
-                    em["title"] = f"Product / demo — {acc}"
-                elif t:
-                    em["title"] = "Product / demo — your opportunity"
-                em["message"] = "Please use the following information from your context."
-                em["custom_message"] = "Context you provided (no additional marketing filler):\n\n" + block
-            else:
-                em["custom_message"] = block
+            self._apply_professional_strict_template(em, acc, opp, et or "")
             return
 
         o = self._narrative_bridge(acc, opp)
@@ -623,12 +677,25 @@ class DataGenerator:
         elif salesforce_context and salesforce_context.strip():
             # Legacy: instruction-style block only (e.g. file context without structured account)
             prefix = salesforce_context.strip() + "\n\n"
+            raw = salesforce_context.strip()
             for em in emails:
                 if strict_sf_context:
-                    em["custom_message"] = (
-                        "Context you provided (strict — no template filler):\n\n"
-                        + salesforce_context.strip()
+                    lines = [l.strip() for l in raw.splitlines() if l.strip()]
+                    em["use_professional_context_template"] = True
+                    em["strict_context_only"] = True
+                    em["account_display"] = ""
+                    if len(lines) >= 2:
+                        em["context_bullets"] = lines[:30]
+                        em["opportunity_narrative"] = ""
+                    else:
+                        em["context_bullets"] = []
+                        em["opportunity_narrative"] = raw
+                    em["email_purpose"] = "Message from your context"
+                    em["lead_in"] = "Structured from the text you supplied."
+                    em["opening_paragraph"] = (
+                        "The following is organized from the information you provided, without added filler."
                     )
+                    em["custom_message"] = ""
                 elif em.get("custom_message"):
                     em["custom_message"] = prefix + em["custom_message"]
                 else:
