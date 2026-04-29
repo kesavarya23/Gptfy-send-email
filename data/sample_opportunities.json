@@ -1,0 +1,35 @@
+[
+  {
+    "opportunity_name": "Enterprise Cloud Migration - Acme Corp",
+    "account_name": "Acme Corporation",
+    "stage": "Proposal/Price Quote",
+    "amount": 125000,
+    "close_date": "2025-03-15",
+    "probability": 75,
+    "owner_name": "John Smith",
+    "description": "Large-scale cloud migration project for Acme Corp's entire infrastructure",
+    "next_steps": "Schedule technical review meeting with CTO"
+  },
+  {
+    "opportunity_name": "CRM Implementation - TechStart Inc",
+    "account_name": "TechStart Inc",
+    "stage": "Negotiation/Review",
+    "amount": 85000,
+    "close_date": "2025-02-28",
+    "probability": 90,
+    "owner_name": "Sarah Johnson",
+    "description": "Full Salesforce CRM implementation with custom integrations",
+    "next_steps": "Final contract review and approval"
+  },
+  {
+    "opportunity_name": "Security Audit - Global Finance",
+    "account_name": "Global Finance Ltd",
+    "stage": "Prospecting",
+    "amount": 45000,
+    "close_date": "2025-04-30",
+    "probability": 30,
+    "owner_name": "Mike Davis",
+    "description": "Comprehensive security audit and compliance assessment",
+    "next_steps": "Initial discovery call scheduled"
+  }
+]
