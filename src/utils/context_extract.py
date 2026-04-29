@@ -21,6 +21,26 @@ def _ext(name: str) -> str:
     return "." + name.rsplit(".", 1)[-1].lower()
 
 
+def _rewind(file_storage) -> None:
+    try:
+        if file_storage and hasattr(file_storage, "seek"):
+            file_storage.seek(0)
+    except Exception:
+        pass
+
+
+def _placeholder_for_empty_upload(file_storage) -> str:
+    """
+    When a file is attached but we extracted no text (OCR off, image blank, etc.),
+    return a short note so validation can pass and the user is nudged to paste details.
+    """
+    name = (getattr(file_storage, "filename", None) or "upload").strip() or "upload"
+    return (
+        f"File attached: {name}. No text was read on this server (OCR may be unavailable). "
+        "Paste Account name, Opportunity, Stage, Amount, and Close date in the text box for accurate emails."
+    )
+
+
 def extract_text_from_upload(file_storage) -> str:
     """
     Read .txt / .md as UTF-8, or run OCR on images if Pillow + pytesseract are available.
@@ -35,19 +55,26 @@ def extract_text_from_upload(file_storage) -> str:
         raw = file_storage.read()
     except Exception as e:
         logger.error("Error reading upload: %s", e)
+        _rewind(file_storage)
         return ""
 
     if not raw:
+        _rewind(file_storage)
         return ""
 
     if ext in ALLOWED_TEXT or ext == "":
-        return raw.decode("utf-8", errors="replace")[:MAX_TEXT].strip()
+        out = raw.decode("utf-8", errors="replace")[:MAX_TEXT].strip()
+        _rewind(file_storage)
+        return out
 
     if ext in ALLOWED_IMAGE:
         # Never inject technical/OCR error strings into email context (use text area instead).
-        return _ocr_image_bytes(raw)[:MAX_IMAGE_TEXT].strip()
+        out = _ocr_image_bytes(raw)[:MAX_IMAGE_TEXT].strip()
+        _rewind(file_storage)
+        return out
 
     logger.warning("Unsupported file type for context: %s", name)
+    _rewind(file_storage)
     return ""
 
 
@@ -92,13 +119,21 @@ def build_salesforce_context(
         return None
     acc = (account_name or "").strip()
     otxt = (opportunity_text or "").strip()
-    file_text = extract_text_from_upload(file_storage) if file_storage and getattr(
-        file_storage, "filename", None
-    ) else ""
+    has_file = bool(
+        file_storage
+        and getattr(file_storage, "filename", None)
+        and (file_storage.filename or "").strip()
+    )
+    file_text = (
+        extract_text_from_upload(file_storage) if has_file else ""
+    )
 
     combined = otxt
     if file_text:
         combined = (combined + "\n\n" + file_text).strip() if combined else file_text
+    # Screenshot with no OCR (e.g. Vercel): file chosen but no extracted text and no typing yet.
+    if not acc and not combined and has_file:
+        combined = _placeholder_for_empty_upload(file_storage)
 
     if not acc and not combined:
         return None
@@ -121,11 +156,14 @@ def combined_opportunity_text(opportunity_text: str, file_storage) -> str:
     for use in narrative generation without re-reading storage.
     """
     otxt = (opportunity_text or "").strip()
-    file_text = (
-        extract_text_from_upload(file_storage)
-        if file_storage and getattr(file_storage, "filename", None)
-        else ""
+    has_file = bool(
+        file_storage
+        and getattr(file_storage, "filename", None)
+        and (file_storage.filename or "").strip()
     )
+    file_text = extract_text_from_upload(file_storage) if has_file else ""
+    if not file_text and not otxt and has_file:
+        return _placeholder_for_empty_upload(file_storage)
     if not file_text:
         return otxt
     if not otxt:
