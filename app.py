@@ -24,7 +24,11 @@ from services.oauth_send import (
     send_gmail,
     send_outlook,
 )
-from utils.context_extract import build_salesforce_context, combined_opportunity_text
+from utils.context_extract import (
+    build_salesforce_context,
+    combined_opportunity_text,
+    is_uploaded_file_without_extractable_text,
+)
 
 app = Flask(__name__)
 # Use a stable secret in production (e.g. Vercel env) so OAuth sessions survive restarts
@@ -233,6 +237,19 @@ def send_emails():
             })
 
         if use_custom_context and not salesforce_context and num_business > 0:
+            if is_uploaded_file_without_extractable_text(
+                opportunity_file,
+                data.get("account_name") or "",
+                data.get("opportunity_text") or "",
+            ):
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        "We could not read text from your image on this server (OCR is often unavailable in the cloud). "
+                        "Please paste the Account, Opportunity, Stage, Amount, and Close date in the text box, then try again. "
+                        "Or upload a .txt / .md file with the same information."
+                    ),
+                })
             return jsonify({
                 "success": False,
                 "error": (

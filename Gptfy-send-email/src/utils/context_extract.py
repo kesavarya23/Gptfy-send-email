@@ -29,16 +29,24 @@ def _rewind(file_storage) -> None:
         pass
 
 
-def _placeholder_for_empty_upload(file_storage) -> str:
+def is_uploaded_file_without_extractable_text(
+    file_storage,
+    account_name: str,
+    opportunity_text: str,
+) -> bool:
     """
-    When a file is attached but we extracted no text (OCR off, image blank, etc.),
-    return a short note so validation can pass and the user is nudged to paste details.
+    True if user attached a file, did not type account or opportunity in the form,
+    and we could not extract any text (e.g. no OCR on server). The UI should show an
+    error — do not use this in email body.
     """
-    name = (getattr(file_storage, "filename", None) or "upload").strip() or "upload"
-    return (
-        f"File attached: {name}. No text was read on this server (OCR may be unavailable). "
-        "Paste Account name, Opportunity, Stage, Amount, and Close date in the text box for accurate emails."
-    )
+    if not file_storage or not getattr(file_storage, "filename", None) or not (
+        (file_storage.filename or "").strip()
+    ):
+        return False
+    if (account_name or "").strip() or (opportunity_text or "").strip():
+        return False
+    extracted = extract_text_from_upload(file_storage)
+    return not (extracted and extracted.strip())
 
 
 def extract_text_from_upload(file_storage) -> str:
@@ -131,9 +139,6 @@ def build_salesforce_context(
     combined = otxt
     if file_text:
         combined = (combined + "\n\n" + file_text).strip() if combined else file_text
-    # Screenshot with no OCR (e.g. Vercel): file chosen but no extracted text and no typing yet.
-    if not acc and not combined and has_file:
-        combined = _placeholder_for_empty_upload(file_storage)
 
     if not acc and not combined:
         return None
@@ -162,8 +167,6 @@ def combined_opportunity_text(opportunity_text: str, file_storage) -> str:
         and (file_storage.filename or "").strip()
     )
     file_text = extract_text_from_upload(file_storage) if has_file else ""
-    if not file_text and not otxt and has_file:
-        return _placeholder_for_empty_upload(file_storage)
     if not file_text:
         return otxt
     if not otxt:

@@ -5,7 +5,7 @@ Generates email content from templates and data
 
 from jinja2 import Environment, FileSystemLoader, Template
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 import logging
 from pathlib import Path
 
@@ -214,6 +214,47 @@ class EmailGenerator:
         """
         try:
             email_type = business_data.get('type')
+
+            if business_data.get("use_professional_context_template"):
+                template = self.env.get_template("professional_context_email.html")
+                template_data = business_data.copy()
+                template_data["generated_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                template_data.setdefault("recipient_name", "there")
+                template_data.setdefault("sender_name", "Your team")
+                if not template_data.get("context_bullets"):
+                    template_data["context_bullets"] = []
+                html_content = template.render(**template_data)
+                subject = business_data.get("subject", template_data.get("email_purpose", "Update"))
+                rname = template_data.get("recipient_name", "there")
+                sname = template_data.get("sender_name", "Your team")
+                lines: List[str] = [
+                    f"Hi {rname},",
+                    "",
+                    (template_data.get("opening_paragraph") or "").strip(),
+                    "",
+                ]
+                if template_data.get("account_display"):
+                    lines.append(f"Account: {template_data['account_display']}")
+                    lines.append("")
+                if template_data.get("context_bullets"):
+                    lines.append("Key details:")
+                    for b in template_data["context_bullets"]:
+                        lines.append(f"  • {b}")
+                    lines.append("")
+                if template_data.get("opportunity_narrative") and not template_data.get("context_bullets"):
+                    lines.append(template_data["opportunity_narrative"])
+                    lines.append("")
+                lines.append(
+                    "If you would like to adjust any part of this, just reply and we can refine the next version."
+                )
+                lines.extend(["", f"Best regards,\n{sname}"])
+                plain_text = "\n".join(lines)
+                logger.info("Generated %s (professional context template)", email_type)
+                return {
+                    "subject": subject,
+                    "html_content": html_content,
+                    "plain_text": plain_text,
+                }
 
             # Map type to template
             template_map = {
