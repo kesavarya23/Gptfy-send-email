@@ -490,6 +490,21 @@
                 <div class="form-section">
                     <h2>📋 Salesforce context (optional)</h2>
                     <p style="color: #666; font-size: 14px; margin-bottom: 10px;">Leave the box below unchecked to keep the current random business emails. Check it to align all generated copy with a real account and opportunity.</p>
+
+                    <!-- Org connection: always visible so you can authorize before enabling custom context -->
+                    <div id="sfOrgConnectStrip" style="margin-bottom: 18px; padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
+                        <div class="info-box" id="sfConfigHint" style="display: none; margin-bottom: 12px;">
+                            <p>Salesforce org connection is not configured on the server. Add <code>SALESFORCE_CLIENT_ID</code>, <code>SALESFORCE_CLIENT_SECRET</code>, and callback URL in the environment.</p>
+                        </div>
+                        <p style="margin-bottom: 8px; font-weight: 600; color: #333;">Connect your Salesforce org (optional)</p>
+                        <p id="sfOrgStatus" style="margin-bottom: 12px; color: #333; font-size: 14px;"></p>
+                        <div style="margin-bottom: 10px;">
+                            <a href="/api/auth/salesforce" class="btn" id="linkConnectSf" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 20px; margin-right: 8px;">Connect Salesforce org</a>
+                            <button type="button" class="btn" id="btnDisconnectSf" style="display: none; width: auto; padding: 10px 20px; background: #666;">Disconnect org</button>
+                        </div>
+                        <p style="color: #555; font-size: 13px; margin: 0;">Authorize once here. Then enable “Use custom Account &amp; Opportunity” below and use <strong>Load from org</strong> to pull Account and Opportunity fields from your org.</p>
+                    </div>
+
                     <label class="topic-checkbox-item" style="margin-bottom: 14px;">
                         <input type="checkbox" id="useCustomSf"> Use custom Account &amp; Opportunity
                     </label>
@@ -498,8 +513,11 @@
                             <input type="checkbox" id="sfStrictContext" checked> <strong>Strict context only</strong> — use my Account + Opportunity text only (no random “wellbeing” or product filler paragraphs)
                         </label>
                         <div class="form-group" style="margin-bottom: 12px;">
-                            <label>Account name</label>
-                            <input type="text" id="sfAccount" placeholder="e.g. Acme Corporation" style="width: 100%;">
+                            <label>Account name or Id</label>
+                            <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                                <input type="text" id="sfAccount" placeholder="Account name or 001… Id from Salesforce" style="flex: 1; min-width: 200px;">
+                                <button type="button" class="btn" id="btnSfLoadOrg" style="width: auto; padding: 10px 18px; margin: 0;">Load from org</button>
+                            </div>
                         </div>
                         <div class="form-group" style="margin-bottom: 12px;">
                             <label>Opportunity details (text)</label>
@@ -618,6 +636,32 @@
                     const oLink = document.getElementById('linkConnectOutlook');
                     oLink.style.pointerEvents = s.microsoft_configured ? 'auto' : 'none';
                     oLink.style.opacity = s.microsoft_configured ? '1' : '0.5';
+
+                    const sfCfg = document.getElementById('sfConfigHint');
+                    const sfSt = document.getElementById('sfOrgStatus');
+                    const sfLink = document.getElementById('linkConnectSf');
+                    const sfDisc = document.getElementById('btnDisconnectSf');
+                    if (sfCfg && sfSt && sfLink && sfDisc) {
+                        sfCfg.style.display = s.salesforce_configured ? 'none' : 'block';
+                        const inst = (s.salesforce_instance_url || '').replace(/^https:\/\//, '');
+                        if (s.salesforce_connected) {
+                            const bits = [];
+                            bits.push('✓ Connected');
+                            if (s.salesforce_org_name) bits.push('Org: ' + s.salesforce_org_name);
+                            if (s.salesforce_username) bits.push('User: ' + s.salesforce_username);
+                            if (s.salesforce_display_name && s.salesforce_display_name !== s.salesforce_username) {
+                                bits.push('(' + s.salesforce_display_name + ')');
+                            }
+                            if (inst) bits.push('Host: ' + inst);
+                            if (s.salesforce_org_id) bits.push('Org Id: ' + s.salesforce_org_id);
+                            sfSt.textContent = bits.join(' · ');
+                        } else {
+                            sfSt.textContent = 'Not connected — connect to load Account / Opportunity from your org.';
+                        }
+                        sfDisc.style.display = s.salesforce_connected ? 'inline-block' : 'none';
+                        sfLink.style.pointerEvents = s.salesforce_configured ? 'auto' : 'none';
+                        sfLink.style.opacity = s.salesforce_configured ? '1' : '0.5';
+                    }
                 })
                 .catch(function() {});
         }
@@ -628,6 +672,50 @@
         document.getElementById('btnDisconnectOutlook').addEventListener('click', function() {
             fetch('/api/auth/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'outlook' }) })
                 .then(function() { authStatusRefresh(); });
+        });
+        document.getElementById('btnDisconnectSf').addEventListener('click', function() {
+            fetch('/api/auth/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'salesforce' }) })
+                .then(function() { authStatusRefresh(); });
+        });
+        document.getElementById('btnSfLoadOrg').addEventListener('click', async function() {
+            const accEl = document.getElementById('sfAccount');
+            const lookup = accEl ? accEl.value.trim() : '';
+            document.getElementById('errorMessage').classList.remove('show');
+            document.getElementById('successMessage').classList.remove('show');
+            if (!lookup) {
+                document.getElementById('errorMessage').textContent = 'Enter an Account name or Account Id first.';
+                document.getElementById('errorMessage').classList.add('show');
+                return;
+            }
+            document.getElementById('btnSfLoadOrg').disabled = true;
+            try {
+                const response = await fetch('/api/salesforce/account', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ account_lookup: lookup }),
+                });
+                const result = await response.json();
+                if (result.success) {
+                    document.getElementById('sfAccount').value = result.account_name || '';
+                    document.getElementById('sfOppText').value = result.opportunity_text || '';
+                    document.getElementById('successMessage').textContent = 'Loaded Account context from Salesforce.';
+                    document.getElementById('successMessage').classList.add('show');
+                } else if (result.needs_pick && result.matches && result.matches.length) {
+                    const lines = result.matches.map(function(m) {
+                        return m.id + ' — ' + (m.name || '') + ' (' + [m.billing_city, m.billing_state].filter(Boolean).join(', ') + ')';
+                    });
+                    document.getElementById('errorMessage').innerHTML =
+                        (result.message || 'Multiple accounts found.') + '<br><br>' + lines.join('<br>');
+                    document.getElementById('errorMessage').classList.add('show');
+                } else {
+                    document.getElementById('errorMessage').textContent = result.error || 'Could not load from Salesforce.';
+                    document.getElementById('errorMessage').classList.add('show');
+                }
+            } catch (e) {
+                document.getElementById('errorMessage').textContent = e.message || 'Request failed.';
+                document.getElementById('errorMessage').classList.add('show');
+            }
+            document.getElementById('btnSfLoadOrg').disabled = false;
         });
         document.getElementById('segGmail').addEventListener('click', function() {
             document.getElementById('segGmail').classList.add('active');
@@ -654,6 +742,16 @@
             }
             if (new URLSearchParams(window.location.search).get('outlook') === 'connected' || new URLSearchParams(window.location.search).get('outlook') === 'ok') {
                 setTimeout(function() { authStatusRefresh(); history.replaceState({}, document.title, '/'); }, 0);
+            }
+            if (new URLSearchParams(window.location.search).get('sf') === 'connected') {
+                setTimeout(function() { authStatusRefresh(); history.replaceState({}, document.title, '/'); }, 0);
+            }
+            const sfErr = new URLSearchParams(window.location.search).get('sf_error');
+            if (sfErr) {
+                const em = document.getElementById('errorMessage');
+                em.textContent = 'Salesforce connection failed (' + sfErr + '). Try again or check server logs.';
+                em.classList.add('show');
+                history.replaceState({}, document.title, '/');
             }
             const u = document.getElementById('useCustomSf');
             if (u) u.addEventListener('change', function() {

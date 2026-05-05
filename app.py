@@ -3,6 +3,8 @@ Salesforce Email Sender - Web UI
 Simple web interface for sending emails
 """
 
+import logging
+
 from flask import Flask, render_template, request, jsonify, session, redirect
 from flask_cors import CORS
 import sys
@@ -29,6 +31,16 @@ from utils.context_extract import (
     combined_opportunity_text,
     is_uploaded_file_without_extractable_text,
 )
+from services.sf_oauth import (
+    exchange_code_for_tokens,
+    enrich_session_from_identity,
+    salesforce_authorize_url,
+    ensure_salesforce_client,
+    session_apply_token_response,
+)
+from services.sf_live_account import resolve_account_bundle
+
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 # Use a stable secret in production (e.g. Vercel env) so OAuth sessions survive restarts
@@ -449,6 +461,7 @@ def _public_base_url():
 def auth_status():
     g_ok = bool(session.get("google_refresh_token") and session.get("google_email"))
     o_ok = bool(session.get("microsoft_refresh_token") and session.get("outlook_email"))
+    sf_ok = bool(session.get("salesforce_refresh_token") and session.get("salesforce_instance_url"))
     return jsonify({
         "gmail_connected": g_ok,
         "gmail_email": session.get("google_email", ""),
@@ -457,6 +470,15 @@ def auth_status():
         "google_configured": bool(os.getenv("GOOGLE_CLIENT_ID") and os.getenv("GOOGLE_CLIENT_SECRET")),
         "microsoft_configured": bool(
             os.getenv("MICROSOFT_CLIENT_ID") and os.getenv("MICROSOFT_CLIENT_SECRET")
+        ),
+        "salesforce_connected": sf_ok,
+        "salesforce_instance_url": session.get("salesforce_instance_url", ""),
+        "salesforce_username": session.get("salesforce_username", ""),
+        "salesforce_org_id": session.get("salesforce_org_id", ""),
+        "salesforce_org_name": session.get("salesforce_org_name", ""),
+        "salesforce_display_name": session.get("salesforce_display_name", ""),
+        "salesforce_configured": bool(
+            os.getenv("SALESFORCE_CLIENT_ID") and os.getenv("SALESFORCE_CLIENT_SECRET")
         ),
     })
 
@@ -570,6 +592,88 @@ def auth_outlook_callback():
     return redirect("/?outlook=connected")
 
 
+@app.route("/api/auth/salesforce", methods=["GET"])
+def auth_salesforce_start():
+    cid = os.getenv("SALESFORCE_CLIENT_ID", "")
+    if not cid or not os.getenv("SALESFORCE_CLIENT_SECRET"):
+        return (
+            "Salesforce OAuth is not configured. Set SALESFORCE_CLIENT_ID, SALESFORCE_CLIENT_SECRET, "
+            "and SALESFORCE_OAUTH_REDIRECT (or rely on PUBLIC_BASE_URL for the callback URL).",
+            503,
+        )
+    state = secrets.token_urlsafe(32)
+    session["oauth_state_sf"] = state
+    redir = os.getenv("SALESFORCE_OAUTH_REDIRECT") or (
+        _public_base_url() + "/api/auth/salesforce/callback"
+    )
+    params = {
+        "client_id": cid,
+        "redirect_uri": redir,
+        "response_type": "code",
+        "scope": "api refresh_token",
+        "state": state,
+        "prompt": "consent",
+    }
+    return redirect(salesforce_authorize_url() + "?" + urllib.parse.urlencode(params))
+
+
+@app.route("/api/auth/salesforce/callback", methods=["GET"])
+def auth_salesforce_callback():
+    if request.args.get("error"):
+        return redirect("/?sf_error=access_denied")
+    if request.args.get("state") != session.get("oauth_state_sf"):
+        return redirect("/?sf_error=state")
+    code = request.args.get("code")
+    if not code:
+        return redirect("/?sf_error=no_code")
+    redir = os.getenv("SALESFORCE_OAUTH_REDIRECT") or (
+        _public_base_url() + "/api/auth/salesforce/callback"
+    )
+    try:
+        j = exchange_code_for_tokens(code, redir)
+        session_apply_token_response(session, j)
+        id_url = j.get("id") or session.get("salesforce_identity_url")
+        at = j.get("access_token") or session.get("salesforce_access_token")
+        if id_url and at:
+            enrich_session_from_identity(session, at, id_url)
+    except RuntimeError:
+        return redirect("/?sf_error=token")
+    return redirect("/?sf=connected")
+
+
+@app.route("/api/salesforce/account", methods=["POST"])
+def salesforce_fetch_account():
+    """Load Account + Opportunity summary from the connected org (Account name or Id)."""
+    body = request.get_json(silent=True) or {}
+    lookup = (body.get("account_lookup") or body.get("lookup") or "").strip()
+    sf_client, err = ensure_salesforce_client(session)
+    if err:
+        return jsonify({"success": False, "error": err}), 401
+    try:
+        result = resolve_account_bundle(sf_client, lookup)
+    except Exception as e:
+        logger.exception("Salesforce account fetch failed")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+    if result.get("needs_pick"):
+        return jsonify({
+            "success": False,
+            "needs_pick": True,
+            "matches": result.get("matches") or [],
+            "message": result.get("error") or "Multiple matches.",
+        })
+
+    if not result.get("ok"):
+        return jsonify({"success": False, "error": result.get("error") or "Lookup failed."}), 400
+
+    return jsonify({
+        "success": True,
+        "account_id": result.get("account_id"),
+        "account_name": result.get("account_name"),
+        "opportunity_text": result.get("opportunity_text"),
+    })
+
+
 @app.route("/api/auth/disconnect", methods=["POST", "GET"])
 def auth_disconnect():
     body = request.get_json(silent=True) or {}
@@ -581,6 +685,16 @@ def auth_disconnect():
     elif p in ("outlook", "microsoft"):
         session.pop("microsoft_refresh_token", None)
         session.pop("outlook_email", None)
+    elif p in ("salesforce", "sf"):
+        session.pop("salesforce_refresh_token", None)
+        session.pop("salesforce_access_token", None)
+        session.pop("salesforce_instance_url", None)
+        session.pop("salesforce_token_at", None)
+        session.pop("salesforce_identity_url", None)
+        session.pop("salesforce_username", None)
+        session.pop("salesforce_org_id", None)
+        session.pop("salesforce_org_name", None)
+        session.pop("salesforce_display_name", None)
     if request.is_json or request.path.endswith("disconnect"):
         return jsonify({"success": True})
     return redirect("/")
