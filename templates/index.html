@@ -493,16 +493,14 @@
 
                     <!-- Org connection: always visible so you can authorize before enabling custom context -->
                     <div id="sfOrgConnectStrip" style="margin-bottom: 18px; padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
-                        <div class="info-box" id="sfConfigHint" style="display: none; margin-bottom: 12px;">
-                            <p>Salesforce org connection is not configured on the server. Add <code>SALESFORCE_CLIENT_ID</code>, <code>SALESFORCE_CLIENT_SECRET</code>, and callback URL in the environment.</p>
-                        </div>
                         <p style="margin-bottom: 8px; font-weight: 600; color: #333;">Connect your Salesforce org (optional)</p>
                         <p id="sfOrgStatus" style="margin-bottom: 12px; color: #333; font-size: 14px;"></p>
                         <div style="margin-bottom: 10px;">
-                            <a href="/api/auth/salesforce" class="btn" id="linkConnectSf" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 20px; margin-right: 8px;">Connect Salesforce org</a>
+                            <a href="/salesforce/setup" class="btn" id="linkConnectSf" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 20px; margin-right: 8px;">Connect Salesforce org</a>
+                            <a href="/salesforce/setup" class="btn" id="linkEditSfSettings" style="display: none; text-align: center; text-decoration: none; width: auto; padding: 10px 20px; margin-right: 8px; background: #fff; color: #4a5cdc; border: 1px solid #4a5cdc;">Edit OAuth settings</a>
                             <button type="button" class="btn" id="btnDisconnectSf" style="display: none; width: auto; padding: 10px 20px; background: #666;">Disconnect org</button>
                         </div>
-                        <p style="color: #555; font-size: 13px; margin: 0;">Authorize once here. Then enable “Use custom Account &amp; Opportunity” below and use <strong>Load from org</strong> to pull Account and Opportunity fields from your org.</p>
+                        <p style="color: #555; font-size: 13px; margin: 0;">You'll be asked for your Connected App's Consumer Key, Secret, and Login URL. Anyone can connect their own org — no server-side <code>.env</code> required.</p>
                     </div>
 
                     <label class="topic-checkbox-item" style="margin-bottom: 14px;">
@@ -637,12 +635,11 @@
                     oLink.style.pointerEvents = s.microsoft_configured ? 'auto' : 'none';
                     oLink.style.opacity = s.microsoft_configured ? '1' : '0.5';
 
-                    const sfCfg = document.getElementById('sfConfigHint');
                     const sfSt = document.getElementById('sfOrgStatus');
                     const sfLink = document.getElementById('linkConnectSf');
+                    const sfEdit = document.getElementById('linkEditSfSettings');
                     const sfDisc = document.getElementById('btnDisconnectSf');
-                    if (sfCfg && sfSt && sfLink && sfDisc) {
-                        sfCfg.style.display = s.salesforce_configured ? 'none' : 'block';
+                    if (sfSt && sfLink && sfDisc) {
                         const inst = (s.salesforce_instance_url || '').replace(/^https:\/\//, '');
                         if (s.salesforce_connected) {
                             const bits = [];
@@ -655,12 +652,24 @@
                             if (inst) bits.push('Host: ' + inst);
                             if (s.salesforce_org_id) bits.push('Org Id: ' + s.salesforce_org_id);
                             sfSt.textContent = bits.join(' · ');
+                            sfLink.style.display = 'none';
+                            if (sfEdit) sfEdit.style.display = 'inline-block';
+                        } else if (s.salesforce_configured) {
+                            sfSt.textContent = 'OAuth settings saved — click below to authorize the org.';
+                            sfLink.textContent = 'Authorize Salesforce';
+                            sfLink.href = '/api/auth/salesforce';
+                            sfLink.style.display = 'inline-block';
+                            if (sfEdit) sfEdit.style.display = 'inline-block';
                         } else {
-                            sfSt.textContent = 'Not connected — connect to load Account / Opportunity from your org.';
+                            sfSt.textContent = 'Not connected — paste your org\u2019s Connected App keys to authorize.';
+                            sfLink.textContent = 'Connect Salesforce org';
+                            sfLink.href = '/salesforce/setup';
+                            sfLink.style.display = 'inline-block';
+                            if (sfEdit) sfEdit.style.display = 'none';
                         }
                         sfDisc.style.display = s.salesforce_connected ? 'inline-block' : 'none';
-                        sfLink.style.pointerEvents = s.salesforce_configured ? 'auto' : 'none';
-                        sfLink.style.opacity = s.salesforce_configured ? '1' : '0.5';
+                        sfLink.style.pointerEvents = 'auto';
+                        sfLink.style.opacity = '1';
                     }
                 })
                 .catch(function() {});

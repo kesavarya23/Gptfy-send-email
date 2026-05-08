@@ -5,6 +5,13 @@ Simple web interface for sending emails
 
 import logging
 
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:
+    pass
+
 from flask import Flask, render_template, request, jsonify, session, redirect
 from flask_cors import CORS
 import sys
@@ -13,6 +20,8 @@ import os
 import time
 import urllib.parse
 import re
+import hashlib
+import base64
 import requests
 sys.path.append('src')
 
@@ -32,11 +41,14 @@ from utils.context_extract import (
     is_uploaded_file_without_extractable_text,
 )
 from services.sf_oauth import (
+    clear_oauth_config as clear_sf_oauth_config,
     exchange_code_for_tokens,
     enrich_session_from_identity,
-    salesforce_authorize_url,
     ensure_salesforce_client,
+    get_oauth_config as get_sf_oauth_config,
+    salesforce_authorize_url,
     session_apply_token_response,
+    store_oauth_config as store_sf_oauth_config,
 )
 from services.sf_live_account import resolve_account_bundle
 
@@ -462,6 +474,7 @@ def auth_status():
     g_ok = bool(session.get("google_refresh_token") and session.get("google_email"))
     o_ok = bool(session.get("microsoft_refresh_token") and session.get("outlook_email"))
     sf_ok = bool(session.get("salesforce_refresh_token") and session.get("salesforce_instance_url"))
+    sf_cfg = get_sf_oauth_config(session)
     return jsonify({
         "gmail_connected": g_ok,
         "gmail_email": session.get("google_email", ""),
@@ -477,9 +490,9 @@ def auth_status():
         "salesforce_org_id": session.get("salesforce_org_id", ""),
         "salesforce_org_name": session.get("salesforce_org_name", ""),
         "salesforce_display_name": session.get("salesforce_display_name", ""),
-        "salesforce_configured": bool(
-            os.getenv("SALESFORCE_CLIENT_ID") and os.getenv("SALESFORCE_CLIENT_SECRET")
-        ),
+        # True when the user has saved Connected App creds in this session OR via .env.
+        "salesforce_configured": bool(sf_cfg["client_id"] and sf_cfg["client_secret"]),
+        "salesforce_login_url": sf_cfg["login_url"],
     })
 
 
@@ -592,29 +605,76 @@ def auth_outlook_callback():
     return redirect("/?outlook=connected")
 
 
+def _sf_callback_url() -> str:
+    """Resolve the Salesforce OAuth callback URL the running app will use."""
+    cfg = get_sf_oauth_config(session)
+    return cfg["redirect_uri"] or (_public_base_url() + "/api/auth/salesforce/callback")
+
+
+@app.route("/salesforce/setup", methods=["GET", "POST"])
+def salesforce_setup():
+    """
+    In-app setup page for the user's own Salesforce Connected App.
+    GET  → render the form (pre-filled from session/.env if present).
+    POST → save credentials in the session and continue to the OAuth flow.
+    """
+    callback_url = _sf_callback_url()
+    if request.method == "POST":
+        client_id = (request.form.get("client_id") or "").strip()
+        client_secret = (request.form.get("client_secret") or "").strip()
+        login_url = (request.form.get("login_url") or "").strip() or "https://login.salesforce.com"
+        redirect_uri = (request.form.get("redirect_uri") or "").strip() or callback_url
+        if not client_id or not client_secret:
+            cfg = get_sf_oauth_config(session)
+            return render_template(
+                "salesforce_setup.html",
+                cfg=cfg,
+                callback_url=callback_url,
+                error="Consumer Key and Consumer Secret are required.",
+            )
+        store_sf_oauth_config(
+            session,
+            client_id=client_id,
+            client_secret=client_secret,
+            login_url=login_url,
+            redirect_uri=redirect_uri,
+        )
+        return redirect("/api/auth/salesforce")
+
+    cfg = get_sf_oauth_config(session)
+    return render_template(
+        "salesforce_setup.html",
+        cfg=cfg,
+        callback_url=callback_url,
+        error=None,
+    )
+
+
 @app.route("/api/auth/salesforce", methods=["GET"])
 def auth_salesforce_start():
-    cid = os.getenv("SALESFORCE_CLIENT_ID", "")
-    if not cid or not os.getenv("SALESFORCE_CLIENT_SECRET"):
-        return (
-            "Salesforce OAuth is not configured. Set SALESFORCE_CLIENT_ID, SALESFORCE_CLIENT_SECRET, "
-            "and SALESFORCE_OAUTH_REDIRECT (or rely on PUBLIC_BASE_URL for the callback URL).",
-            503,
-        )
+    cfg = get_sf_oauth_config(session)
+    if not cfg["client_id"] or not cfg["client_secret"]:
+        return redirect("/salesforce/setup")
     state = secrets.token_urlsafe(32)
     session["oauth_state_sf"] = state
-    redir = os.getenv("SALESFORCE_OAUTH_REDIRECT") or (
-        _public_base_url() + "/api/auth/salesforce/callback"
-    )
+    # PKCE: generate verifier, store in session; send SHA-256 challenge to Salesforce.
+    code_verifier = secrets.token_urlsafe(64)
+    session["oauth_pkce_verifier_sf"] = code_verifier
+    code_challenge = base64.urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode("ascii")).digest()
+    ).decode("ascii").rstrip("=")
+    redir = cfg["redirect_uri"] or (_public_base_url() + "/api/auth/salesforce/callback")
     params = {
-        "client_id": cid,
+        "client_id": cfg["client_id"],
         "redirect_uri": redir,
         "response_type": "code",
         "scope": "api refresh_token",
         "state": state,
         "prompt": "consent",
+        "code_challenge": code_challenge,
+        "code_challenge_method": "S256",
     }
-    return redirect(salesforce_authorize_url() + "?" + urllib.parse.urlencode(params))
+    return redirect(salesforce_authorize_url(session) + "?" + urllib.parse.urlencode(params))
 
 
 @app.route("/api/auth/salesforce/callback", methods=["GET"])
@@ -626,11 +686,13 @@ def auth_salesforce_callback():
     code = request.args.get("code")
     if not code:
         return redirect("/?sf_error=no_code")
-    redir = os.getenv("SALESFORCE_OAUTH_REDIRECT") or (
-        _public_base_url() + "/api/auth/salesforce/callback"
-    )
+    cfg = get_sf_oauth_config(session)
+    redir = cfg["redirect_uri"] or (_public_base_url() + "/api/auth/salesforce/callback")
+    code_verifier = session.pop("oauth_pkce_verifier_sf", None)
     try:
-        j = exchange_code_for_tokens(code, redir)
+        j = exchange_code_for_tokens(
+            code, redir, code_verifier=code_verifier, session=session
+        )
         session_apply_token_response(session, j)
         id_url = j.get("id") or session.get("salesforce_identity_url")
         at = j.get("access_token") or session.get("salesforce_access_token")
@@ -695,6 +757,8 @@ def auth_disconnect():
         session.pop("salesforce_org_id", None)
         session.pop("salesforce_org_name", None)
         session.pop("salesforce_display_name", None)
+        # Also drop saved Connected App credentials so the user can paste a new org.
+        clear_sf_oauth_config(session)
     if request.is_json or request.path.endswith("disconnect"):
         return jsonify({"success": True})
     return redirect("/")

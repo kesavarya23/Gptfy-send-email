@@ -26,18 +26,14 @@ wheels/
 .installed.cfg
 *.egg
 
-# IDE
+# IDE / agent local config
 .vscode/
 .idea/
+.claude/
+.cursor/
 *.swp
 *.swo
 *~
-
-# Data files (if containing sensitive info)
-data/*.csv
-data/*.json
-!data/sample_*.csv
-!data/sample_*.json
 
 # Logs
 *.log

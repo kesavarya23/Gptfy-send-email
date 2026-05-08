@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect Salesforce Org · OAuth Setup</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 30px 20px;
+        }
+        .container {
+            max-width: 760px;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 32px 40px;
+        }
+        .header h1 { font-size: 26px; margin-bottom: 6px; }
+        .header p { opacity: 0.9; font-size: 14px; }
+        .body { padding: 32px 40px; }
+
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #1976d2;
+            padding: 14px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #0d3c61;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        .info-box code, .callback-url code {
+            background: rgba(13, 60, 97, 0.08);
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 13px;
+        }
+        .callback-url {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #f5f7ff;
+            border: 1px solid #c5cae9;
+            border-radius: 8px;
+            padding: 12px 14px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+        .callback-url strong { color: #333; font-size: 13px; }
+        .callback-url .url {
+            flex: 1;
+            min-width: 220px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 13px;
+            color: #1a237e;
+            word-break: break-all;
+        }
+        .copy-btn {
+            background: #fff;
+            border: 1px solid #c5cae9;
+            color: #1a237e;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .copy-btn:hover { background: #e8eaf6; }
+
+        .form-group { margin-bottom: 18px; }
+        .form-group label {
+            display: block;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 6px;
+            font-size: 14px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            font-size: 14px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-family: inherit;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        .field-hint {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-top: 6px;
+        }
+        .required { color: #c62828; }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border: none;
+            padding: 13px 28px;
+            font-size: 15px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .btn:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(102, 126, 234, 0.3); }
+        .btn-ghost {
+            background: #f5f5f5;
+            color: #333;
+        }
+        .btn-ghost:hover {
+            background: #ececec;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .error-banner {
+            background: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #c62828;
+            padding: 12px 14px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 18px;
+        }
+
+        .help {
+            background: #fafafa;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 16px 18px;
+            margin-top: 24px;
+            font-size: 13px;
+            color: #555;
+            line-height: 1.6;
+        }
+        .help h3 { color: #333; font-size: 14px; margin-bottom: 8px; }
+        .help ol { padding-left: 20px; }
+        .help li { margin-bottom: 4px; }
+        .help a { color: #1565c0; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔐 Connect Salesforce Org</h1>
+            <p>Paste the OAuth credentials from your Salesforce Connected App. They are stored only in your current session.</p>
+        </div>
+
+        <div class="body">
+            {% if error %}
+                <div class="error-banner">{{ error }}</div>
+            {% endif %}
+
+            <div class="info-box">
+                In your Salesforce org go to <strong>Setup → App Manager → New Connected App</strong>, enable OAuth, add the
+                callback URL below, and grant the scopes <code>api</code> and <code>refresh_token</code>. Then copy the
+                Consumer Key and Consumer Secret here.
+            </div>
+
+            <div class="callback-url">
+                <strong>Callback URL:</strong>
+                <span class="url" id="callbackUrl">{{ callback_url }}</span>
+                <button type="button" class="copy-btn" id="copyCallbackBtn">Copy</button>
+            </div>
+
+            <form method="POST" action="/salesforce/setup" autocomplete="off">
+                <div class="form-group">
+                    <label for="client_id">Consumer Key (Client ID) <span class="required">*</span></label>
+                    <input type="text" id="client_id" name="client_id" required
+                           placeholder="3MVG9..."
+                           value="{{ cfg.client_id or '' }}">
+                    <span class="field-hint">From your Connected App → API (Enable OAuth Settings) → Consumer Key.</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="client_secret">Consumer Secret <span class="required">*</span></label>
+                    <input type="password" id="client_secret" name="client_secret" required
+                           placeholder="Click 'Click to reveal' in Salesforce, then paste here"
+                           value="{{ cfg.client_secret or '' }}">
+                    <span class="field-hint">Stored only in this browser session, never written to disk.</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="login_url">Login URL</label>
+                    <input type="text" id="login_url" name="login_url"
+                           placeholder="https://login.salesforce.com"
+                           value="{{ cfg.login_url or 'https://login.salesforce.com' }}">
+                    <span class="field-hint">
+                        Production: <code>https://login.salesforce.com</code> &nbsp;·&nbsp;
+                        Sandbox: <code>https://test.salesforce.com</code> &nbsp;·&nbsp;
+                        Or paste your <strong>My Domain</strong> URL (e.g. <code>https://yourorg.my.salesforce.com</code>).
+                    </span>
+                </div>
+
+                <div class="form-group">
+                    <label for="redirect_uri">Callback URL</label>
+                    <input type="text" id="redirect_uri" name="redirect_uri"
+                           value="{{ cfg.redirect_uri or callback_url }}">
+                    <span class="field-hint">Must match exactly what you configured in the Connected App. Defaults to this server's callback.</span>
+                </div>
+
+                <div class="actions">
+                    <button type="submit" class="btn">Save &amp; Connect to Salesforce</button>
+                    <a href="/" class="btn btn-ghost">Cancel</a>
+                </div>
+            </form>
+
+            <div class="help">
+                <h3>Quick steps</h3>
+                <ol>
+                    <li>Salesforce Setup → <strong>App Manager</strong> → <strong>New Connected App</strong>.</li>
+                    <li>Tick <strong>Enable OAuth Settings</strong>. Paste the Callback URL above.</li>
+                    <li>Selected OAuth Scopes: <code>Manage user data via APIs (api)</code> and <code>Perform requests at any time (refresh_token, offline_access)</code>.</li>
+                    <li>Save, wait ~10 minutes for Salesforce to propagate, then copy the Consumer Key and Consumer Secret here.</li>
+                    <li>If the org uses My Domain or is a sandbox, change the Login URL accordingly.</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('copyCallbackBtn').addEventListener('click', function () {
+            var url = document.getElementById('callbackUrl').textContent.trim();
+            var btn = this;
+            var done = function () { btn.textContent = 'Copied'; setTimeout(function () { btn.textContent = 'Copy'; }, 1500); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(url).then(done).catch(function () {
+                    window.prompt('Copy this URL:', url);
+                });
+            } else {
+                window.prompt('Copy this URL:', url);
+            }
+        });
+    </script>
+</body>
+</html>
