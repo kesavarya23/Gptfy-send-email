@@ -38,3 +38,6 @@ wheels/
 # Logs
 *.log
 logs/
+
+# Sibling / nested repos that have their own GitHub remote
+Email-sender/
