@@ -15,7 +15,8 @@ _ACCOUNT_SOQL_FIELDS = (
 )
 
 _OPP_SOQL_FIELDS = (
-    "Name, StageName, Amount, CloseDate, NextStep, Probability, IsClosed, LastModifiedDate"
+    "Name, StageName, Amount, CloseDate, NextStep, Probability, "
+    "IsClosed, LastModifiedDate"
 )
 
 
@@ -48,22 +49,23 @@ def fetch_account_record(sf, account_id: str) -> Optional[Dict[str, Any]]:
     return recs[0] if recs else None
 
 
-def fetch_opportunities_for_account(sf, account_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+def fetch_opportunities_for_account(sf, account_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Fetch ONLY open opportunities (IsClosed = false) for the account.
+
+    Closed-Won / Closed-Lost opportunities are intentionally excluded —
+    we only want to send outreach about deals that are still in pipeline.
+    Ordered by most recent CloseDate, then largest Amount.
+    """
     aid = _escape_soql_string(account_id)
     q_open = (
-        f"SELECT {_OPP_SOQL_FIELDS} FROM Opportunity WHERE AccountId = '{aid}' "
-        f"AND IsClosed = false ORDER BY Amount DESC NULLS LAST LIMIT {limit}"
+        f"SELECT {_OPP_SOQL_FIELDS} FROM Opportunity "
+        f"WHERE AccountId = '{aid}' AND IsClosed = false "
+        f"ORDER BY CloseDate ASC NULLS LAST, Amount DESC NULLS LAST "
+        f"LIMIT {limit}"
     )
     res = sf.query(q_open)
-    rows = list(res.get("records") or [])
-    if rows:
-        return rows
-    q_any = (
-        f"SELECT {_OPP_SOQL_FIELDS} FROM Opportunity WHERE AccountId = '{aid}' "
-        f"ORDER BY LastModifiedDate DESC LIMIT 10"
-    )
-    res2 = sf.query(q_any)
-    return list(res2.get("records") or [])
+    return list(res.get("records") or [])
 
 
 def _fmt_money(v: Any) -> str:
@@ -115,12 +117,11 @@ def format_account_and_opportunities(
         lines.append("Account notes:")
         lines.append(desc[:8000])
 
-    if opps:
+    open_opps = [o for o in opps if not o.get("IsClosed")]
+    if open_opps:
         lines.append("")
-        lines.append("Open opportunities (from org):" if any(
-            not o.get("IsClosed") for o in opps
-        ) else "Recent opportunities (from org):")
-        for o in opps:
+        lines.append(f"Open opportunities (from org) — {len(open_opps)}:")
+        for o in open_opps:
             amt = _fmt_money(o.get("Amount"))
             parts = [
                 o.get("Name") or "Opportunity",
@@ -135,7 +136,7 @@ def format_account_and_opportunities(
                 lines.append(f"  Next step: {ns[:500]}")
     else:
         lines.append("")
-        lines.append("(No opportunities linked to this account in Salesforce.)")
+        lines.append("(No open opportunities for this account in Salesforce.)")
 
     return name, "\n".join(lines).strip()
 

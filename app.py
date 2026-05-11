@@ -51,6 +51,7 @@ from services.sf_oauth import (
     store_oauth_config as store_sf_oauth_config,
 )
 from services.sf_live_account import resolve_account_bundle
+from services.ai_writer import compose_email as ai_compose_email, is_ai_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,58 @@ def _as_bool(v):
     return str(v).lower() in ("true", "1", "yes", "on")
 
 
+def _maybe_ai_email(
+    *,
+    purpose: str,
+    fallback,
+    to_list,
+    sender_name: str,
+    subject_seed: str = "",
+    user_message: str = "",
+    account_name: str = "",
+    account_details: str = "",
+    opportunity_text: str = "",
+    structured_record=None,
+    extra_notes: str = "",
+):
+    """
+    Produce a (subject, html, plain_text) email triple.
+
+    When OPENAI_API_KEY is configured, the LLM writes the email using all
+    available Salesforce / opportunity / case / user-supplied context. On any
+    failure (no key, network error, malformed response) we fall back to the
+    legacy template-based ``fallback()`` callable so sending never breaks.
+    """
+    if is_ai_enabled():
+        recipient_email = (to_list[0] if to_list else "") or ""
+        ai = ai_compose_email(
+            purpose=purpose,
+            recipient_email=recipient_email,
+            sender_name=sender_name,
+            subject_seed=subject_seed,
+            user_message=user_message,
+            account_name=account_name,
+            account_details=account_details,
+            opportunity_text=opportunity_text,
+            structured_record=structured_record or {},
+            extra_notes=extra_notes,
+        )
+        if ai:
+            return {
+                "subject": ai["subject"],
+                "html_content": ai["html_content"],
+                "plain_text": ai["plain_text"],
+                "ai": True,
+            }
+    legacy = fallback()
+    return {
+        "subject": legacy["subject"],
+        "html_content": legacy["html_content"],
+        "plain_text": legacy.get("plain_text") or "",
+        "ai": False,
+    }
+
+
 def _parse_email_list(value) -> list:
     """Parse comma, semicolon, or newline–separated addresses from a string or list."""
     if value is None:
@@ -179,7 +232,7 @@ def _parse_send_payload():
 @app.route('/')
 def index():
     """Main page"""
-    return render_template('index.html')
+    return render_template('index.html', ai_enabled=is_ai_enabled())
 
 
 @app.route('/send_emails', methods=['POST'])
@@ -307,12 +360,33 @@ def send_emails():
         # Generate and send opportunities
         if num_opportunities > 0:
             opportunities = data_generator.generate_opportunities(num_opportunities)
+            sf_account_for_ai = (data.get("account_name") or "").strip()
+            sf_opp_for_ai = (data.get("opportunity_text") or "").strip() if use_custom_context else ""
 
             for i, opp in enumerate(opportunities, 1):
                 try:
-                    email_content = email_generator.generate_opportunity_email(
-                        opportunity_data=opp,
-                        custom_message=custom_message
+                    email_content = _maybe_ai_email(
+                        purpose="opportunity",
+                        fallback=lambda o=opp: email_generator.generate_opportunity_email(
+                            opportunity_data=o,
+                            custom_message=custom_message,
+                        ),
+                        to_list=to_list,
+                        sender_name=sender_name,
+                        subject_seed=f"Salesforce Opportunity Update: {opp.get('opportunity_name', '')}".strip(),
+                        user_message=custom_message,
+                        account_name=sf_account_for_ai or (opp.get("account_name") or ""),
+                        opportunity_text=sf_opp_for_ai,
+                        structured_record={
+                            "opportunity_name": opp.get("opportunity_name"),
+                            "account_name": opp.get("account_name"),
+                            "stage": opp.get("stage_name"),
+                            "amount": opp.get("amount"),
+                            "close_date": opp.get("close_date"),
+                            "owner_name": opp.get("owner_name"),
+                            "probability": opp.get("probability"),
+                            "next_step": opp.get("next_step"),
+                        },
                     )
 
                     success = _do_send_email(
@@ -345,12 +419,36 @@ def send_emails():
         # Generate and send cases
         if num_cases > 0:
             cases = data_generator.generate_cases(num_cases)
+            sf_account_for_ai = (data.get("account_name") or "").strip()
+            sf_opp_for_ai = (data.get("opportunity_text") or "").strip() if use_custom_context else ""
 
             for i, case in enumerate(cases, 1):
                 try:
-                    email_content = email_generator.generate_case_email(
-                        case_data=case,
-                        custom_message=custom_message
+                    email_content = _maybe_ai_email(
+                        purpose="case",
+                        fallback=lambda c=case: email_generator.generate_case_email(
+                            case_data=c,
+                            custom_message=custom_message,
+                        ),
+                        to_list=to_list,
+                        sender_name=sender_name,
+                        subject_seed=(
+                            f"Case {case.get('case_number', '')} - {case.get('subject', '')}".strip(" -")
+                        ),
+                        user_message=custom_message,
+                        account_name=sf_account_for_ai or (case.get("account_name") or ""),
+                        opportunity_text=sf_opp_for_ai,
+                        structured_record={
+                            "case_number": case.get("case_number"),
+                            "subject": case.get("subject"),
+                            "status": case.get("status"),
+                            "priority": case.get("priority"),
+                            "case_type": case.get("case_type"),
+                            "origin": case.get("origin"),
+                            "contact_name": case.get("contact_name"),
+                            "owner_name": case.get("owner_name"),
+                            "description": case.get("description"),
+                        },
                     )
 
                     success = _do_send_email(
@@ -398,9 +496,45 @@ def send_emails():
                 strict_sf_context=strict_sf,
             )
 
+            sf_account_for_ai = (data.get("account_name") or "").strip()
+            sf_opp_for_ai = opp_combined or ""
+
             for i, business_email in enumerate(business_emails, 1):
                 try:
-                    email_content = email_generator.generate_business_email(business_email)
+                    bet = business_email.get("type") or "business"
+                    email_content = _maybe_ai_email(
+                        purpose=bet,
+                        fallback=lambda be=business_email: email_generator.generate_business_email(be),
+                        to_list=to_list,
+                        sender_name=sender_name,
+                        subject_seed=business_email.get("subject", "") or "",
+                        user_message=custom_message,
+                        account_name=sf_account_for_ai,
+                        opportunity_text=sf_opp_for_ai,
+                        structured_record={
+                            "type": bet,
+                            "meeting_title": business_email.get("meeting_title"),
+                            "agenda": business_email.get("agenda"),
+                            "date": business_email.get("date"),
+                            "time": business_email.get("time"),
+                            "location": business_email.get("location"),
+                            "context": business_email.get("context"),
+                            "reason": business_email.get("reason"),
+                            "company": business_email.get("company"),
+                            "project_name": business_email.get("project_name"),
+                            "milestone": business_email.get("milestone"),
+                            "completion": business_email.get("completion"),
+                            "status": business_email.get("status"),
+                            "reminder_about": business_email.get("reminder_about"),
+                            "due_date": business_email.get("due_date"),
+                        },
+                        extra_notes=(
+                            "Strict context only: write the email using ONLY the user's "
+                            "Salesforce context above and the custom message — no random "
+                            "wellbeing or product filler."
+                            if strict_sf else ""
+                        ),
+                    )
 
                     success = _do_send_email(
                         send_method, agent, to_list,
