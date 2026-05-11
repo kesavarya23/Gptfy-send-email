@@ -20,6 +20,7 @@ import os
 import time
 import urllib.parse
 import re
+import html as html_lib
 import hashlib
 import base64
 import requests
@@ -30,8 +31,10 @@ from utils.data_generator import DataGenerator
 from utils.email_generator import EmailGenerator
 from services.oauth_send import (
     get_google_user_email,
+    get_google_user_info,
     get_microsoft_access_token,
     get_microsoft_user_email,
+    get_microsoft_user_info,
     send_gmail,
     send_outlook,
 )
@@ -70,6 +73,40 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 CORS(app)  # Enable CORS for all routes
 
 
+def _plain_text_to_minimal_html(plain_text: str) -> str:
+    """Wrap paragraph-separated plain text in a tiny, unstyled HTML shell.
+
+    Gmail's web UI renders ``text/plain`` bodies inside a narrow fixed-width
+    column (~600px), which makes paragraphs look cramped and pre-wrapped
+    compared with Outlook (which flows plain text across its full reading
+    pane). Sending an HTML alternative tells Gmail to use its normal HTML
+    email rendering, so the message looks the same in both clients.
+
+    The HTML is deliberately minimal — system font, normal paragraph
+    spacing, no card / background / border — so the email still reads like
+    a "normally typed message" rather than marketing mail.
+    """
+    if not plain_text or not plain_text.strip():
+        return ""
+    paragraphs = [p for p in re.split(r"\n\s*\n", plain_text.strip()) if p.strip()]
+    if not paragraphs:
+        return ""
+    parts = []
+    for p in paragraphs:
+        escaped = html_lib.escape(p.strip()).replace("\n", "<br>")
+        parts.append(f'<p style="margin:0 0 14px 0;">{escaped}</p>')
+    inner = "\n".join(parts)
+    return (
+        '<!DOCTYPE html><html><head><meta charset="utf-8"></head>'
+        '<body style="margin:0;padding:0;'
+        'font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,'
+        'Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;'
+        'color:#202124;">'
+        f"{inner}"
+        "</body></html>"
+    )
+
+
 def _do_send_email(
     send_method: str,
     agent,
@@ -86,23 +123,22 @@ def _do_send_email(
     message we have (Graph error body, SMTP exception text, etc.) so the
     caller can show it in the UI.
 
-    NOTE: We deliberately drop the HTML body and only send plain text. The
-    upstream AI writer / legacy templates produce a styled HTML "card" that
-    makes the message look like marketing mail in the recipient's inbox.
-    Users wanted the emails to look like a normally typed message, so we
-    force plain-text on the wire for every send method.
+    Both Gmail and Outlook receive a multipart message: the plain-text body
+    (so it stays readable for clients that strip HTML) plus a minimal HTML
+    body generated from that same plain text. The minimal HTML is what makes
+    Gmail render with the same paragraph width / spacing as Outlook — Gmail
+    otherwise displays plain-text emails in a narrow fixed-width column.
+    We intentionally ignore the upstream AI writer's styled HTML "card" so
+    the message still looks like a normally typed email, not marketing mail.
     """
     if not to_list:
         return False, "No recipient addresses"
     cc = list(cc or [])
     bcc = list(bcc or [])
-    # Force plain-text only — never pass the styled HTML body to the send
-    # backend. If plain_text is empty for some reason, fall back to a
-    # tag-stripped version of the HTML so we never send a blank body.
     if not (plain_text and plain_text.strip()) and html_content:
         plain_text = re.sub(r"<[^>]+>", "", html_content)
         plain_text = re.sub(r"\n{3,}", "\n\n", plain_text).strip()
-    html_content = ""
+    html_content = _plain_text_to_minimal_html(plain_text)
     if send_method == "gmail":
         cid = os.getenv("GOOGLE_CLIENT_ID", "")
         cs = os.getenv("GOOGLE_CLIENT_SECRET", "")
@@ -297,9 +333,44 @@ def send_emails():
         # Get form data (JSON or multipart for file upload)
         data, opportunity_file = _parse_send_payload()
 
-        sender_email = data.get("sender_email")
+        sender_email = data.get("sender_email") or ""
         sender_password = data.get("sender_password")
-        sender_name = data.get("sender_name", sender_email)
+        sender_name_raw = (data.get("sender_name") or "").strip()
+        send_method_peek = (data.get("send_method") or "smtp").lower()
+        oauth_email_for_name = ""
+        if not sender_name_raw or sender_name_raw == sender_email:
+            if send_method_peek == "gmail":
+                sender_name_raw = (
+                    session.get("google_name")
+                    or session.get("google_given_name")
+                    or ""
+                ).strip()
+                oauth_email_for_name = session.get("google_email", "")
+            elif send_method_peek == "outlook":
+                sender_name_raw = (
+                    session.get("outlook_name")
+                    or session.get("outlook_given_name")
+                    or ""
+                ).strip()
+                oauth_email_for_name = session.get("outlook_email", "")
+        if not sender_name_raw:
+            # Last-ditch: derive a Title-Cased name from the connected email's
+            # local-part (e.g. "jane.doe@acme.com" -> "Jane Doe"). Better than
+            # leaving the "Best regards," line dangling.
+            src_email = oauth_email_for_name or sender_email
+            if "@" in src_email:
+                local = src_email.split("@", 1)[0].split("+", 1)[0]
+                tokens = [
+                    t for t in re.split(r"[._\-]+", local)
+                    if t and any(c.isalpha() for c in t)
+                ]
+                if tokens:
+                    sender_name_raw = " ".join(
+                        "".join(c for c in t if c.isalpha()).capitalize()
+                        for t in tokens
+                        if "".join(c for c in t if c.isalpha())
+                    ).strip()
+        sender_name = sender_name_raw or sender_email or ""
         to_list = _parse_email_list(
             data.get("to_emails")
             or data.get("recipient_to")
@@ -756,9 +827,13 @@ def auth_google_callback():
     at = j.get("access_token")
     if at:
         session["google_access_token"] = at
-        email = get_google_user_email(at)
-        if email:
-            session["google_email"] = email
+        info = get_google_user_info(at)
+        if info.get("email"):
+            session["google_email"] = info["email"]
+        if info.get("name"):
+            session["google_name"] = info["name"]
+        if info.get("given_name"):
+            session["google_given_name"] = info["given_name"]
     return redirect("/?gmail=connected")
 
 
@@ -812,9 +887,13 @@ def auth_outlook_callback():
     if j.get("refresh_token"):
         session["microsoft_refresh_token"] = j["refresh_token"]
     if j.get("access_token"):
-        em = get_microsoft_user_email(j["access_token"])
-        if em:
-            session["outlook_email"] = em
+        info = get_microsoft_user_info(j["access_token"])
+        if info.get("email"):
+            session["outlook_email"] = info["email"]
+        if info.get("name"):
+            session["outlook_name"] = info["name"]
+        if info.get("given_name"):
+            session["outlook_given_name"] = info["given_name"]
     return redirect("/?outlook=connected")
 
 
@@ -957,9 +1036,13 @@ def auth_disconnect():
         session.pop("google_refresh_token", None)
         session.pop("google_email", None)
         session.pop("google_access_token", None)
+        session.pop("google_name", None)
+        session.pop("google_given_name", None)
     elif p in ("outlook", "microsoft"):
         session.pop("microsoft_refresh_token", None)
         session.pop("outlook_email", None)
+        session.pop("outlook_name", None)
+        session.pop("outlook_given_name", None)
     elif p in ("salesforce", "sf"):
         session.pop("salesforce_refresh_token", None)
         session.pop("salesforce_access_token", None)

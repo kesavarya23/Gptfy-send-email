@@ -115,17 +115,23 @@ def _temperature() -> float:
 
 
 def _name_from_email(addr: str) -> str:
-    """Best-effort first-name guess from an email like 'jane.doe@acme.com'."""
+    """Best-effort first-name guess from an email like 'jane.doe@acme.com'.
+
+    Returns '' when the local-part doesn't look like a real name (contains
+    digits, is too short, etc.) so the caller can fall back to a generic
+    greeting like 'Hi there,' instead of producing 'Hi Kesavcbe23,'.
+    """
     a = (addr or "").strip()
     if "@" not in a:
-        return a or "there"
-    local = a.split("@", 1)[0]
-    local = local.split("+", 1)[0]
+        return ""
+    local = a.split("@", 1)[0].split("+", 1)[0]
     parts = [p for p in local.replace("_", ".").replace("-", ".").split(".") if p]
     if not parts:
-        return "there"
+        return ""
     first = parts[0]
-    return first[:1].upper() + first[1:].lower() if first else "there"
+    if not first.isalpha() or len(first) < 2:
+        return ""
+    return first[:1].upper() + first[1:].lower()
 
 
 def _format_dict_block(label: str, d: Dict[str, Any]) -> str:
@@ -218,6 +224,12 @@ def _build_messages(
         sections.append(f"Sender (writing the email): {sender_name}")
     if recipient_name:
         sections.append(f"Recipient (greeted as 'Hi {recipient_name},'): {recipient_name}")
+    else:
+        sections.append(
+            "Recipient name is UNKNOWN. If you choose to include a greeting, "
+            "use exactly 'Hi there,' — do NOT invent names like 'team', "
+            "'customer', 'friend', or anything similar."
+        )
     if subject_seed:
         sections.append(
             f"Suggested subject (you may keep, refine, or replace): {subject_seed}"
@@ -359,12 +371,22 @@ def _render_plain_text(
     _ = subject  # kept in signature for API stability / future use
     lines: List[str] = []
     if not has_greeting:
-        lines.extend([f"Hi {recipient_name or 'there'},", ""])
+        greeting = f"Hi {recipient_name}," if recipient_name else "Hi there,"
+        lines.extend([greeting, ""])
     for p in paragraphs:
         lines.append(p)
         lines.append("")
     if not has_signoff:
-        lines.extend(["Best regards,", sender_name or "Your team"])
+        # Trim the trailing blank line so the sign-off sits one line below the
+        # last paragraph (standard email spacing) instead of two.
+        if lines and lines[-1] == "":
+            lines.pop()
+        lines.append("")
+        lines.append("Best regards,")
+        # Only add a name line when we actually have a real sender name —
+        # avoid the awkward "Your team" placeholder.
+        if sender_name and sender_name.strip():
+            lines.append(sender_name.strip())
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -444,7 +466,7 @@ def compose_email(
         return None
 
     rname = (recipient_name or "").strip() or _name_from_email(recipient_email)
-    sname = (sender_name or "").strip() or "Your team"
+    sname = (sender_name or "").strip()
 
     messages = _build_messages(
         purpose=purpose,

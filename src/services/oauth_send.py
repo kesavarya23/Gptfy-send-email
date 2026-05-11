@@ -14,13 +14,29 @@ logger = logging.getLogger(__name__)
 
 
 def get_google_user_email(access_token: str) -> str:
-    r = requests.get(
-        "https://www.googleapis.com/oauth2/v2/userinfo",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=30,
-    )
-    r.raise_for_status()
-    return r.json().get("email", "")
+    info = get_google_user_info(access_token)
+    return info.get("email", "")
+
+
+def get_google_user_info(access_token: str) -> dict:
+    """Return ``{'email', 'name', 'given_name', 'family_name'}`` for the user."""
+    try:
+        r = requests.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+        r.raise_for_status()
+        d = r.json() or {}
+    except Exception as e:
+        logger.warning("Google userinfo fetch failed: %s", e)
+        return {}
+    return {
+        "email": d.get("email", ""),
+        "name": d.get("name", ""),
+        "given_name": d.get("given_name", ""),
+        "family_name": d.get("family_name", ""),
+    }
 
 
 def get_microsoft_access_token(refresh_token: str) -> Optional[str]:
@@ -47,15 +63,32 @@ def get_microsoft_access_token(refresh_token: str) -> Optional[str]:
 
 
 def get_microsoft_user_email(access_token: str) -> str:
-    r = requests.get(
-        "https://graph.microsoft.com/v1.0/me",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=30,
-    )
-    if not r.ok:
-        return ""
-    d = r.json()
-    return d.get("userPrincipalName") or d.get("mail") or d.get("email", "")
+    info = get_microsoft_user_info(access_token)
+    return info.get("email", "")
+
+
+def get_microsoft_user_info(access_token: str) -> dict:
+    """Return ``{'email', 'name', 'given_name', 'family_name'}`` for the user."""
+    try:
+        r = requests.get(
+            "https://graph.microsoft.com/v1.0/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=30,
+        )
+        if not r.ok:
+            return {}
+        d = r.json() or {}
+    except Exception as e:
+        logger.warning("Microsoft user fetch failed: %s", e)
+        return {}
+    return {
+        "email": (
+            d.get("userPrincipalName") or d.get("mail") or d.get("email", "")
+        ),
+        "name": d.get("displayName", ""),
+        "given_name": d.get("givenName", ""),
+        "family_name": d.get("surname", ""),
+    }
 
 
 def _addr_list(
@@ -99,9 +132,8 @@ def send_gmail(
     from googleapiclient.discovery import build
 
     creds = Credentials(
-        None,
-        refresh_token=refresh_token,
         token=None,
+        refresh_token=refresh_token,
         token_uri="https://oauth2.googleapis.com/token",
         client_id=client_id,
         client_secret=client_secret,
