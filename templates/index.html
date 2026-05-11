@@ -507,24 +507,29 @@
                         <input type="checkbox" id="useCustomSf"> Use custom Account &amp; Opportunity
                     </label>
                     <div id="sfContextPanel" style="display: none; padding: 12px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e0e0e0;">
-                        <label class="topic-checkbox-item" style="margin-bottom: 12px;">
-                            <input type="checkbox" id="sfStrictContext" checked> <strong>Strict context only</strong> — use my Account + Opportunity text only (no random “wellbeing” or product filler paragraphs)
-                        </label>
                         <div class="form-group" style="margin-bottom: 12px;">
-                            <label>Account name or Id</label>
+                            <label style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" id="includeAccount" checked style="width: auto; margin: 0; cursor: pointer;">
+                                <span>Account name or Id</span>
+                            </label>
+                            <small style="color: #666; font-size: 12px; display: block; margin: -2px 0 6px 24px;">Uncheck to exclude Account context from the AI-generated email.</small>
                             <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
                                 <input type="text" id="sfAccount" placeholder="Account name or 001… Id from Salesforce" style="flex: 1; min-width: 200px;">
                                 <button type="button" class="btn" id="btnSfLoadOrg" style="width: auto; padding: 10px 18px; margin: 0;">Load from org</button>
                             </div>
                         </div>
                         <div class="form-group" style="margin-bottom: 12px;">
-                            <label>Opportunity details (text)</label>
+                            <label style="display: flex; align-items: center; gap: 8px;">
+                                <input type="checkbox" id="includeOpportunity" checked style="width: auto; margin: 0; cursor: pointer;">
+                                <span>Opportunity details (text)</span>
+                            </label>
+                            <small style="color: #666; font-size: 12px; display: block; margin: -2px 0 6px 24px;">Uncheck to exclude Opportunity context from the AI-generated email.</small>
                             <textarea id="sfOppText" rows="5" placeholder="Paste from Salesforce, email, or notes: stage, amount, contacts, next steps…" style="width: 100%; min-height: 100px;"></textarea>
                         </div>
                         <div class="form-group" style="margin-bottom: 0;">
                             <label>Or upload a file / screenshot</label>
                             <input type="file" id="sfOppFile" accept=".txt,.md,.text,.png,.jpg,.jpeg,.gif,.webp" style="width: 100%;">
-                            <small style="color: #666; display: block; margin-top: 6px;"><strong>Best results:</strong> paste Account name, Opportunity name, Stage, Amount, and Close date into the text box above. Screenshot OCR only works if Tesseract is installed on the server (often not on cloud hosts); if OCR is unavailable, images are ignored—never paste-only screenshots without text.</small>
+                            <small style="color: #666; display: block; margin-top: 6px;"><strong>Best results:</strong> paste Account name, Opportunity name, Stage, Amount, and Close date into the text box above. Screenshots are read with local OCR (Tesseract) when available, and otherwise transcribed by the configured OpenAI vision model — so image uploads work on cloud hosts too as long as the OpenAI key is set.</small>
                         </div>
                     </div>
                 </div>
@@ -707,6 +712,12 @@
                 if (result.success) {
                     document.getElementById('sfAccount').value = result.account_name || '';
                     document.getElementById('sfOppText').value = result.opportunity_text || '';
+                    // After a successful load from org, both context toggles default to ON
+                    // so the AI-generated email uses Account + Opportunity context by default.
+                    var incA = document.getElementById('includeAccount');
+                    var incO = document.getElementById('includeOpportunity');
+                    if (incA) incA.checked = true;
+                    if (incO) incO.checked = true;
                     document.getElementById('successMessage').textContent = 'Loaded Account context from Salesforce.';
                     document.getElementById('successMessage').classList.add('show');
                 } else if (result.needs_pick && result.matches && result.matches.length) {
@@ -852,11 +863,16 @@
                 selectedTopics.forEach(function (t) { formData.append('selected_topics', t); });
             }
             formData.append('use_custom_context', useSf ? 'true' : 'false');
-            formData.append('strict_sf_context', (useSf && document.getElementById('sfStrictContext').checked) ? 'true' : 'false');
-            formData.append('account_name', document.getElementById('sfAccount').value);
-            formData.append('opportunity_text', document.getElementById('sfOppText').value);
+            const incAccountEl = document.getElementById('includeAccount');
+            const incOppEl = document.getElementById('includeOpportunity');
+            const includeAccount = incAccountEl ? incAccountEl.checked : true;
+            const includeOpportunity = incOppEl ? incOppEl.checked : true;
+            formData.append('include_account', includeAccount ? 'true' : 'false');
+            formData.append('include_opportunity', includeOpportunity ? 'true' : 'false');
+            formData.append('account_name', includeAccount ? document.getElementById('sfAccount').value : '');
+            formData.append('opportunity_text', includeOpportunity ? document.getElementById('sfOppText').value : '');
             const upFile = document.getElementById('sfOppFile').files[0];
-            if (upFile) {
+            if (upFile && includeOpportunity) {
                 formData.append('opportunity_file', upFile);
             }
 

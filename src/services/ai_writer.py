@@ -353,7 +353,11 @@ def _render_plain_text(
     has_greeting = bool(paragraphs) and _starts_with_greeting(paragraphs[0])
     has_signoff = bool(paragraphs) and _has_signoff(paragraphs[-1])
 
-    lines: List[str] = [f"Subject: {subject}", ""]
+    # NOTE: Do NOT prepend "Subject: …" here. The subject is carried by the MIME
+    # envelope (Gmail / Outlook display it as the message title). Repeating it
+    # in the body shows up as a stray "Subject:" line for the recipient.
+    _ = subject  # kept in signature for API stability / future use
+    lines: List[str] = []
     if not has_greeting:
         lines.extend([f"Hi {recipient_name or 'there'},", ""])
     for p in paragraphs:

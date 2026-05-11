@@ -206,13 +206,27 @@ def _parse_send_payload():
             "use_custom_context": str(f.get("use_custom_context", "")).lower() in (
                 "true", "1", "on", "yes",
             ),
-            "strict_sf_context": str(f.get("strict_sf_context", "")).lower() in (
+            # Per-field include toggles. Default to True when the field is missing
+            # so older clients / API callers keep their previous behaviour.
+            "include_account": str(f.get("include_account", "true")).lower() in (
+                "true", "1", "on", "yes",
+            ),
+            "include_opportunity": str(f.get("include_opportunity", "true")).lower() in (
                 "true", "1", "on", "yes",
             ),
             "account_name": f.get("account_name") or "",
             "opportunity_text": f.get("opportunity_text") or "",
         }
-        return data, request.files.get("opportunity_file")
+        opp_file = request.files.get("opportunity_file")
+        # If the user unchecked the opportunity context box, ignore Account-side
+        # values too only for the opp side: drop opp text and the uploaded file
+        # so neither reaches the AI / data generator.
+        if not data["include_opportunity"]:
+            data["opportunity_text"] = ""
+            opp_file = None
+        if not data["include_account"]:
+            data["account_name"] = ""
+        return data, opp_file
     data = request.get_json() or {}
     data.setdefault("to_emails", data.get("recipient_to") or data.get("to_emails") or "")
     data.setdefault("cc_emails", data.get("cc_emails") or "")
@@ -223,9 +237,15 @@ def _parse_send_payload():
     elif not isinstance(st, list):
         data["selected_topics"] = [st] if st else []
     data["use_custom_context"] = _as_bool(data.get("use_custom_context"))
-    data["strict_sf_context"] = _as_bool(data.get("strict_sf_context", False))
+    # Default include_* to True for JSON callers that don't send the flag.
+    data["include_account"] = _as_bool(data.get("include_account", True))
+    data["include_opportunity"] = _as_bool(data.get("include_opportunity", True))
     data["account_name"] = data.get("account_name") or ""
     data["opportunity_text"] = data.get("opportunity_text") or ""
+    if not data["include_account"]:
+        data["account_name"] = ""
+    if not data["include_opportunity"]:
+        data["opportunity_text"] = ""
     return data, None
 
 
@@ -263,7 +283,12 @@ def send_emails():
         if send_method not in ("smtp", "gmail", "outlook"):
             send_method = "smtp"
         use_custom_context = _as_bool(data.get("use_custom_context"))
-        strict_sf = _as_bool(data.get("strict_sf_context")) and use_custom_context
+        # Strict context is now implicit: whenever the user supplies custom Salesforce
+        # context, we always nudge the LLM (and the legacy template fallback) to stick
+        # to that context only — no random "wellbeing" or product filler. The previous
+        # user-facing checkbox was redundant with the system prompt; this keeps the
+        # behaviour without the UI noise.
+        strict_sf = use_custom_context
         salesforce_context = build_salesforce_context(
             use_custom_context,
             data.get("account_name") or "",
@@ -360,8 +385,13 @@ def send_emails():
         # Generate and send opportunities
         if num_opportunities > 0:
             opportunities = data_generator.generate_opportunities(num_opportunities)
+            # Always forward whatever Salesforce context was loaded into the form
+            # (via /api/salesforce/account) to the LLM, regardless of the
+            # "use custom context" toggle. That toggle only controls the legacy
+            # template-based generator; the AI writer should always ground its
+            # output in real CRM data when it is available.
             sf_account_for_ai = (data.get("account_name") or "").strip()
-            sf_opp_for_ai = (data.get("opportunity_text") or "").strip() if use_custom_context else ""
+            sf_opp_for_ai = (data.get("opportunity_text") or "").strip()
 
             for i, opp in enumerate(opportunities, 1):
                 try:
@@ -420,7 +450,7 @@ def send_emails():
         if num_cases > 0:
             cases = data_generator.generate_cases(num_cases)
             sf_account_for_ai = (data.get("account_name") or "").strip()
-            sf_opp_for_ai = (data.get("opportunity_text") or "").strip() if use_custom_context else ""
+            sf_opp_for_ai = (data.get("opportunity_text") or "").strip()
 
             for i, case in enumerate(cases, 1):
                 try:
@@ -496,8 +526,13 @@ def send_emails():
                 strict_sf_context=strict_sf,
             )
 
+            # AI writer always sees the Salesforce-loaded context plus any
+            # uploaded file/text, regardless of the "use custom context" toggle.
+            # The toggle still governs the legacy data generator above.
             sf_account_for_ai = (data.get("account_name") or "").strip()
-            sf_opp_for_ai = opp_combined or ""
+            sf_opp_for_ai = combined_opportunity_text(
+                data.get("opportunity_text") or "", opportunity_file
+            )
 
             for i, business_email in enumerate(business_emails, 1):
                 try:
