@@ -31,10 +31,8 @@ from agent import EmailAgent
 from utils.data_generator import DataGenerator
 from utils.email_generator import EmailGenerator
 from services.oauth_send import (
-    get_google_user_email,
     get_google_user_info,
     get_microsoft_access_token,
-    get_microsoft_user_email,
     get_microsoft_user_info,
     send_gmail,
     send_outlook,
@@ -189,6 +187,101 @@ def _as_bool(v):
     if v is None:
         return False
     return str(v).lower() in ("true", "1", "yes", "on")
+
+
+def _email_style_directives(
+    *,
+    one_opp_mode: bool,
+    strict_sf: bool = False,
+) -> str:
+    """Build the ``extra_notes`` block we send to the AI writer.
+
+    Centralises three requirements that the email-output had been missing:
+      1. ONE-opportunity rule (only when ``one_opp_mode`` — i.e. the call is
+         paired with a single real Salesforce opportunity record). Without
+         this, the LLM tends to summarise every opp it sees in the context
+         block, producing emails that name 2-3 deals at once.
+      2. Personal / rapport-building tone — the previous output read like
+         marketing boilerplate ("Thank you for reaching out … I appreciate
+         your interest"). We ask for a warm, human opener that's grounded
+         in real context, not invented personal life facts.
+      3. Length floor — the base system prompt's "short, high-signal" + "3-5
+         short paragraphs" defaults were producing ~600-800 char bodies. We
+         explicitly request 1300–1700 chars across 5-7 substantive paragraphs.
+    """
+    blocks = []
+    if one_opp_mode:
+        blocks.append(
+            "STRICT single-opportunity rule: this email is about EXACTLY ONE "
+            "opportunity — the one described in the structured record and the "
+            "opportunity context above. Do NOT name, list, summarise, or "
+            "compare any other deals on this account, even if more opportunities "
+            "are visible elsewhere. Keep the entire narrative focused on this "
+            "one deal — its stage, value, next step, and what you need from "
+            "the recipient to move it forward."
+        )
+    blocks.append(
+        "Length: aim for 1300 to 1700 characters of body text (not counting "
+        "the greeting and sign-off). Use 5 to 7 substantive paragraphs of "
+        "2 to 4 sentences each. Do NOT default to the 'short' style — this "
+        "is a relationship email, not a one-line ping."
+    )
+    blocks.append(
+        "Personal touch / rapport: open the body with ONE warm, human sentence "
+        "that acknowledges the working relationship or the recipient's likely "
+        "context (e.g. 'I know things have been moving quickly on your side as "
+        "we get closer to close…'). Sprinkle small humanising touches through "
+        "the email — a courteous offer to make their week easier, a brief "
+        "acknowledgement of their team's effort, a forward-looking line about "
+        "working together. Do NOT invent personal-life facts (kids, vacation, "
+        "weekend plans) and do NOT use generic marketing phrases like 'Thank "
+        "you for reaching out' or 'I appreciate your interest'."
+    )
+    blocks.append(
+        "Tone: warm, confident, relationship-building. Write like you are "
+        "emailing a colleague you respect and have worked with for months — "
+        "not a stranger on a marketing list."
+    )
+    if strict_sf:
+        blocks.append(
+            "Stay grounded in the user's Salesforce context and custom message "
+            "above. Any 'personal touch' must be relational (about the working "
+            "partnership), not invented facts about wellbeing, family, or "
+            "weekends."
+        )
+    return "\n\n".join(blocks)
+
+
+def _pick_opps_for_send(account_name_in_form: str, count: int):
+    """Return ``count`` real Salesforce opps to use, one per email.
+
+    Reads the structured opp list cached by ``/api/salesforce/account``.
+    Only used when the account name in the form still matches the one we
+    loaded against (so a manual edit invalidates the cache and we fall
+    back to legacy random generation).
+
+    Behaviour:
+      * 6 opps + 6 requested  → all 6, randomised order, one per email.
+      * 6 opps + 1 requested  → 1 randomly picked real opp.
+      * 6 opps + 10 requested → all 6 once, then 4 cycled repeats.
+      * No cache / no match   → returns ``([], None)`` so caller falls back.
+
+    Returns ``(picked_opps, cached_account_name)`` — the second value is
+    used by the result list to label rows like "Opportunity 3 of 6".
+    """
+    if count <= 0:
+        return [], None
+    cached_opps = session.get("sf_account_opportunities") or []
+    cached_account = (session.get("sf_account_name_loaded") or "").strip()
+    acc_in_form = (account_name_in_form or "").strip()
+    if not (cached_opps and cached_account and acc_in_form):
+        return [], None
+    if cached_account.lower() != acc_in_form.lower():
+        return [], None
+    shuffled = list(cached_opps)
+    random.shuffle(shuffled)
+    picked = [shuffled[i % len(shuffled)] for i in range(count)]
+    return picked, cached_account
 
 
 def _maybe_ai_email(
@@ -436,7 +529,7 @@ def send_emails():
         if num_opportunities == 0 and num_cases == 0 and num_business == 0:
             return jsonify({
                 'success': False,
-                'error': 'Please specify at least 1 opportunity, case, or business email'
+                'error': 'Please enter at least 1 in "No. of emails to send"'
             })
 
         if num_business > 0 and topic_mode == 'custom' and not selected_topics:
@@ -501,38 +594,23 @@ def send_emails():
 
             # Prefer the real per-opportunity list cached by /api/salesforce/account
             # so we can send ONE email per real opp instead of a single context
-            # blob duplicated across N emails. We only trust the cache when the
-            # account name in the form still matches the one we loaded against —
-            # if the user edited it manually, fall through to legacy generation.
-            cached_opps = session.get("sf_account_opportunities") or []
-            cached_account = (session.get("sf_account_name_loaded") or "").strip()
-            use_real_opps = bool(
-                cached_opps
-                and cached_account
-                and sf_account_for_ai
-                and cached_account.lower() == sf_account_for_ai.lower()
+            # blob duplicated across N emails.
+            picked_real_opps, cached_account = _pick_opps_for_send(
+                sf_account_for_ai, num_opportunities
             )
+            use_real_opps = bool(picked_real_opps)
 
             if use_real_opps:
-                # Randomise once per send so a single-email request picks a
-                # random opp, and a multi-email request gets a randomised
-                # order. We cycle if the user asked for more emails than the
-                # account has open opps (so 10 emails on 6 opps = each of the
-                # 6 at least once, then 4 repeats in shuffled order).
-                shuffled = list(cached_opps)
-                random.shuffle(shuffled)
-                opps_for_send = [
-                    shuffled[i % len(shuffled)] for i in range(num_opportunities)
-                ]
-                # Tag each row with a 1-based source index so the result list
-                # shows e.g. "Opportunity 3 of 6" even when we sample/cycle.
+                opps_for_send = picked_real_opps
                 source_index_by_name = {
-                    o.get("name"): idx + 1 for idx, o in enumerate(cached_opps)
+                    o.get("name"): idx + 1
+                    for idx, o in enumerate(session.get("sf_account_opportunities") or [])
                 }
+                total_real_opps = len(session.get("sf_account_opportunities") or [])
             else:
-                # Legacy fallback: synthetic random opportunities as before.
                 opps_for_send = data_generator.generate_opportunities(num_opportunities)
                 source_index_by_name = {}
+                total_real_opps = 0
 
             for i, opp in enumerate(opps_for_send, 1):
                 try:
@@ -540,8 +618,6 @@ def send_emails():
                         opp_name = opp.get("name") or "Opportunity"
                         opp_account = opp.get("account_name") or sf_account_for_ai
                         # Per-opp brief: just THIS opp's facts, not the whole list.
-                        # That's what guarantees the LLM writes the email about
-                        # exactly one real deal instead of mixing all of them.
                         per_opp_text = opp.get("brief_text") or ""
                         subject_seed = (
                             f"Salesforce Opportunity Update: {opp_name}".strip()
@@ -589,12 +665,9 @@ def send_emails():
                         account_name=opp_account,
                         opportunity_text=per_opp_text,
                         structured_record=structured_record,
-                        extra_notes=(
-                            "Write this email about EXACTLY ONE opportunity — the one "
-                            "described in the structured record and opportunity context "
-                            "above. Do not reference, list, or compare other deals."
-                            if use_real_opps
-                            else ""
+                        extra_notes=_email_style_directives(
+                            one_opp_mode=use_real_opps,
+                            strict_sf=strict_sf,
                         ),
                     )
 
@@ -615,7 +688,7 @@ def send_emails():
                         src_idx = source_index_by_name.get(result_name)
                         if src_idx:
                             entry['source'] = (
-                                f"Opportunity {src_idx} of {len(cached_opps)} "
+                                f"Opportunity {src_idx} of {total_real_opps} "
                                 f"from {cached_account}"
                             )
                     if not success and send_err:
@@ -730,9 +803,82 @@ def send_emails():
                 data.get("opportunity_text") or "", opportunity_file
             )
 
+            # Pair each business email with ONE real Salesforce opportunity so
+            # the AI grounds the message in a single deal instead of listing
+            # every open opp on the account. Same logic as the opportunity
+            # loop: randomised, cycled if needed, falls back to the existing
+            # "big blob" behaviour when the user hasn't loaded an SF account.
+            picked_business_opps, cached_account_b = _pick_opps_for_send(
+                sf_account_for_ai, num_business
+            )
+            business_one_opp_mode = bool(picked_business_opps)
+            total_real_opps_b = (
+                len(session.get("sf_account_opportunities") or [])
+                if business_one_opp_mode
+                else 0
+            )
+            source_index_by_name_b = (
+                {
+                    o.get("name"): idx + 1
+                    for idx, o in enumerate(session.get("sf_account_opportunities") or [])
+                }
+                if business_one_opp_mode
+                else {}
+            )
+
             for i, business_email in enumerate(business_emails, 1):
                 try:
                     bet = business_email.get("type") or "business"
+
+                    # Compute per-email account / opp context:
+                    #  - one-opp mode: feed ONLY this opp's brief, not the
+                    #    full list. That is the actual fix for "the email
+                    #    talks about 2-3 opportunities at once".
+                    #  - legacy mode: keep the previous wider context blob.
+                    if business_one_opp_mode:
+                        picked_opp = picked_business_opps[i - 1]
+                        per_email_account = (
+                            picked_opp.get("account_name") or sf_account_for_ai
+                        )
+                        per_email_opp_text = picked_opp.get("brief_text") or ""
+                        picked_opp_name = picked_opp.get("name") or ""
+                    else:
+                        picked_opp = None
+                        per_email_account = sf_account_for_ai
+                        per_email_opp_text = sf_opp_for_ai
+                        picked_opp_name = ""
+
+                    structured_record = {
+                        "type": bet,
+                        "meeting_title": business_email.get("meeting_title"),
+                        "agenda": business_email.get("agenda"),
+                        "date": business_email.get("date"),
+                        "time": business_email.get("time"),
+                        "location": business_email.get("location"),
+                        "context": business_email.get("context"),
+                        "reason": business_email.get("reason"),
+                        "company": business_email.get("company"),
+                        "project_name": business_email.get("project_name"),
+                        "milestone": business_email.get("milestone"),
+                        "completion": business_email.get("completion"),
+                        "status": business_email.get("status"),
+                        "reminder_about": business_email.get("reminder_about"),
+                        "due_date": business_email.get("due_date"),
+                    }
+                    if picked_opp is not None:
+                        # Surface the chosen opp's fields so the LLM can quote
+                        # specifics (stage, amount, close date) for this single
+                        # deal — and nothing else.
+                        structured_record.update({
+                            "focus_opportunity_name": picked_opp.get("name"),
+                            "focus_opportunity_stage": picked_opp.get("stage"),
+                            "focus_opportunity_amount": picked_opp.get("amount"),
+                            "focus_opportunity_amount_display": picked_opp.get("amount_str"),
+                            "focus_opportunity_close_date": picked_opp.get("close_date"),
+                            "focus_opportunity_probability": picked_opp.get("probability"),
+                            "focus_opportunity_next_step": picked_opp.get("next_step"),
+                        })
+
                     email_content = _maybe_ai_email(
                         purpose=bet,
                         fallback=lambda be=business_email: email_generator.generate_business_email(be),
@@ -740,30 +886,12 @@ def send_emails():
                         sender_name=sender_name,
                         subject_seed=business_email.get("subject", "") or "",
                         user_message=custom_message,
-                        account_name=sf_account_for_ai,
-                        opportunity_text=sf_opp_for_ai,
-                        structured_record={
-                            "type": bet,
-                            "meeting_title": business_email.get("meeting_title"),
-                            "agenda": business_email.get("agenda"),
-                            "date": business_email.get("date"),
-                            "time": business_email.get("time"),
-                            "location": business_email.get("location"),
-                            "context": business_email.get("context"),
-                            "reason": business_email.get("reason"),
-                            "company": business_email.get("company"),
-                            "project_name": business_email.get("project_name"),
-                            "milestone": business_email.get("milestone"),
-                            "completion": business_email.get("completion"),
-                            "status": business_email.get("status"),
-                            "reminder_about": business_email.get("reminder_about"),
-                            "due_date": business_email.get("due_date"),
-                        },
-                        extra_notes=(
-                            "Strict context only: write the email using ONLY the user's "
-                            "Salesforce context above and the custom message — no random "
-                            "wellbeing or product filler."
-                            if strict_sf else ""
+                        account_name=per_email_account,
+                        opportunity_text=per_email_opp_text,
+                        structured_record=structured_record,
+                        extra_notes=_email_style_directives(
+                            one_opp_mode=business_one_opp_mode,
+                            strict_sf=strict_sf,
                         ),
                     )
 
@@ -793,13 +921,21 @@ def send_emails():
                         'status': 'Sent' if success else 'Failed',
                         'number': i,
                     }
+                    if business_one_opp_mode and picked_opp_name:
+                        src_idx = source_index_by_name_b.get(picked_opp_name)
+                        if src_idx:
+                            entry['source'] = (
+                                f"Grounded in Opportunity {src_idx} of "
+                                f"{total_real_opps_b} ({picked_opp_name}) "
+                                f"from {cached_account_b}"
+                            )
                     if not success and send_err:
                         entry['error'] = send_err
                     all_emails.append(entry)
 
                 except Exception as e:
                     all_emails.append({
-                        'type': 'Business Email',
+                        'type': 'Email',
                         'name': business_email.get('subject', 'Unknown'),
                         'status': 'Failed',
                         'error': str(e),

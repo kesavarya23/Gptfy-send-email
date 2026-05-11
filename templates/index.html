@@ -489,7 +489,7 @@
                 <!-- Optional Salesforce context -->
                 <div class="form-section">
                     <h2>📋 Salesforce context (optional)</h2>
-                    <p style="color: #666; font-size: 14px; margin-bottom: 10px;">Leave the box below unchecked to keep the current random business emails. Check it to align all generated copy with a real account and opportunity.</p>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 10px;">Leave the box below unchecked to generate emails with random sample context. Check it to align every email with a real Salesforce account and its open opportunities — one opportunity per email.</p>
 
                     <!-- Org connection: always visible so you can authorize before enabling custom context -->
                     <div id="sfOrgConnectStrip" style="margin-bottom: 18px; padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
@@ -536,10 +536,11 @@
 
                 <!-- Email Configuration -->
                 <div class="form-section">
-                    <h2>⚙️ Business Email Configuration</h2>
+                    <h2>⚙️ Email Configuration</h2>
                     <div class="form-group">
-                        <label>Business Emails</label>
+                        <label>No. of emails to send</label>
                         <input type="number" id="num_business" min="0" value="0" placeholder="0">
+                        <small style="color: #666; font-size: 12px; display: block; margin-top: 4px;">When a Salesforce account is loaded above, each email is anchored to one of that account's open opportunities (random pick, cycled if you ask for more emails than opportunities).</small>
                         <label style="margin-top: 12px; margin-bottom: 6px; display: block; font-size: 14px; color: #333;">Topic selection</label>
                         <div class="segment-control">
                             <button type="button" class="segment-option active" data-mode="default" id="segmentDefault">Default</button>

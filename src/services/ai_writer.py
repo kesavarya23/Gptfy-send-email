@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MODEL = "gpt-4o-mini"
 _DEFAULT_TEMPERATURE = 0.4
 _DEFAULT_TIMEOUT = 30
-_MAX_PARAGRAPHS = 6
+# Bumped from 6 → 8 so the "5 to 7 paragraphs" directive in the
+# /send_emails extra_notes can land without being silently trimmed.
+_MAX_PARAGRAPHS = 8
 _MAX_PARAGRAPH_LEN = 1200
 _MAX_SUBJECT_LEN = 200
 _MAX_CUSTOM_PROMPT_LEN = 16000
@@ -184,21 +186,29 @@ def _build_messages(
     purpose_label = _PURPOSE_LABELS.get(purpose, "a professional business email")
 
     base_system = (
-        "You are an experienced B2B account executive who writes short, high-signal "
-        "client emails. Hard rules you ALWAYS follow:\n"
+        "You are an experienced B2B account executive who writes high-signal, "
+        "relationship-grounded client emails. You sound like a real person who "
+        "knows the account, not a marketing template. Hard rules you ALWAYS follow:\n"
         "1. Use ONLY the facts you are given. Never invent prices, dates, names, "
         "products, partnerships, or quotes.\n"
         "2. Output STRICTLY valid JSON with this exact shape:\n"
         '   {"subject": "string", "paragraphs": ["string", "string", ...]}\n'
         "3. The subject must be specific (<= 80 chars) and avoid clickbait or ALL CAPS.\n"
         "4. Each item in 'paragraphs' is one paragraph of the email body. The app will "
-        "render them as separate paragraphs in the email.\n\n"
-        "Soft defaults (overridable by the team system prompt below if one is present):\n"
-        "- 3 to 5 short paragraphs, 2 to 4 sentences each.\n"
+        "render them as separate paragraphs in the email.\n"
+        "5. If a 'Length' / 'Personal touch' / 'Tone' instruction appears in the user "
+        "message's Additional notes, treat it as authoritative — it OVERRIDES the soft "
+        "defaults below.\n\n"
+        "Soft defaults (used only when the user message doesn't specify otherwise; "
+        "always overridable by the team system prompt below if one is present):\n"
+        "- 4 to 6 substantive paragraphs of 2 to 4 sentences each, warm and "
+        "relationship-grounded — never curt or marketing-flavoured.\n"
         "- You may include a greeting in the first paragraph (e.g. 'Hi Jane,') and a "
         "  sign-off in the last paragraph (e.g. 'Best regards,\\nKesav') if it improves "
         "  realism. The app auto-detects them and will not duplicate.\n"
-        "- If a Salesforce opportunity is provided, ground the email in its specifics."
+        "- If a Salesforce opportunity is provided, ground the email in its specifics.\n"
+        "- Avoid generic openers like 'Thank you for reaching out' or 'I appreciate "
+        "  your interest' — they read like marketing boilerplate."
     )
 
     custom = _load_custom_system_prompt()
