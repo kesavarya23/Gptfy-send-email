@@ -252,6 +252,79 @@ def _email_style_directives(
     return "\n\n".join(blocks)
 
 
+# Pool of "opening style" hints we rotate through per batch so a run of
+# N emails doesn't collapse into N near-identical openers ("I hope this email
+# finds you well…"). One of these is forwarded to the AI writer for each
+# email; the writer treats it as authoritative for the OPENING SENTENCE and
+# overall structure, while the body still respects the Salesforce context
+# and the user's custom message.
+_OPENING_STYLE_HINTS = (
+    "Open with a concrete detail about THIS deal's current stage or momentum. "
+    "The first sentence MUST lead with a specific fact pulled from the structured "
+    "record (stage, milestone, timeline, amount, or owner) — never a hope/wellness "
+    "filler line.",
+
+    "Open with a forward-looking line tied to an upcoming step or window for "
+    "this opportunity. Anchor the first sentence on a named next action or a "
+    "date already present in the structured record / brief.",
+
+    "Open by acknowledging, in one specific sentence, the recipient's or their "
+    "team's recent contribution on THIS deal. Avoid generic 'thanks for your "
+    "time' phrasing — name the actual thing they did or are doing.",
+
+    "Open with a one-sentence status framing — where this deal stands right "
+    "now, in plain language. Then transition into the reason for writing. "
+    "Skip any 'hope you are well' opener.",
+
+    "Open by surfacing the single decision or question the recipient currently "
+    "owns on this opportunity. Make the first sentence land that question, "
+    "conversationally, before any context.",
+
+    "Open with a short, human note about pace or context (e.g. 'with the close "
+    "date narrowing in' or 'now that the proposal is in front of your team'), "
+    "grounded ONLY in the structured record. Do not invent personal-life facts.",
+
+    "Open by referencing the most recent shared touchpoint (a meeting, working "
+    "session, or previous thread) and pivot immediately — within the first two "
+    "sentences — to today's reason for writing.",
+
+    "Open by naming, in plain language, the one thing you need from the "
+    "recipient to move this opportunity forward. The rest of the email then "
+    "supports that single ask.",
+
+    "Open with a brief observation about the broader account / industry context "
+    "as it touches THIS deal (one sentence only), then immediately ground in a "
+    "specific opportunity fact. No generic market commentary.",
+
+    "Open by quickly recapping the most recent change on this deal (a stage "
+    "advance, a new next step, a refreshed close date), in one sentence, before "
+    "stating today's purpose. Use only facts from the structured record.",
+)
+
+
+def _build_opening_style_batch(n: int) -> list:
+    """Return ``n`` opening-style hints with no two consecutive duplicates.
+
+    Shuffled per request so emails in the SAME batch never share an opener,
+    and successive batches don't always start on the same style.
+    """
+    if n <= 0:
+        return []
+    pool = list(_OPENING_STYLE_HINTS)
+    random.shuffle(pool)
+    if n <= len(pool):
+        return pool[:n]
+    out = list(pool)
+    while len(out) < n:
+        next_pool = list(_OPENING_STYLE_HINTS)
+        random.shuffle(next_pool)
+        # Avoid an immediate repeat at the boundary.
+        if next_pool and out and next_pool[0] == out[-1] and len(next_pool) > 1:
+            next_pool[0], next_pool[1] = next_pool[1], next_pool[0]
+        out.extend(next_pool)
+    return out[:n]
+
+
 def _pick_opps_for_send(account_name_in_form: str, count: int):
     """Return ``count`` real Salesforce opps to use, one per email.
 
@@ -297,6 +370,7 @@ def _maybe_ai_email(
     opportunity_text: str = "",
     structured_record=None,
     extra_notes: str = "",
+    variation_hint: str = "",
 ):
     """
     Produce a (subject, html, plain_text) email triple.
@@ -305,6 +379,9 @@ def _maybe_ai_email(
     available Salesforce / opportunity / case / user-supplied context. On any
     failure (no key, network error, malformed response) we fall back to the
     legacy template-based ``fallback()`` callable so sending never breaks.
+
+    ``variation_hint`` is forwarded to the AI writer so a batch of N emails
+    produces N distinct openers / structures instead of N near-duplicates.
     """
     if is_ai_enabled():
         recipient_email = (to_list[0] if to_list else "") or ""
@@ -319,6 +396,7 @@ def _maybe_ai_email(
             opportunity_text=opportunity_text,
             structured_record=structured_record or {},
             extra_notes=extra_notes,
+            variation_hint=variation_hint,
         )
         if ai:
             return {
@@ -612,6 +690,10 @@ def send_emails():
                 source_index_by_name = {}
                 total_real_opps = 0
 
+            # Per-batch shuffled list of opening-style hints — one per email — so
+            # the first sentences across the batch are clearly different.
+            opp_opening_styles = _build_opening_style_batch(len(opps_for_send))
+
             for i, opp in enumerate(opps_for_send, 1):
                 try:
                     if use_real_opps:
@@ -669,6 +751,10 @@ def send_emails():
                             one_opp_mode=use_real_opps,
                             strict_sf=strict_sf,
                         ),
+                        variation_hint=(
+                            opp_opening_styles[i - 1]
+                            if i - 1 < len(opp_opening_styles) else ""
+                        ),
                     )
 
                     success, send_err = _do_send_email(
@@ -718,6 +804,8 @@ def send_emails():
             sf_account_for_ai = (data.get("account_name") or "").strip()
             sf_opp_for_ai = (data.get("opportunity_text") or "").strip()
 
+            case_opening_styles = _build_opening_style_batch(len(cases))
+
             for i, case in enumerate(cases, 1):
                 try:
                     email_content = _maybe_ai_email(
@@ -745,6 +833,10 @@ def send_emails():
                             "owner_name": case.get("owner_name"),
                             "description": case.get("description"),
                         },
+                        variation_hint=(
+                            case_opening_styles[i - 1]
+                            if i - 1 < len(case_opening_styles) else ""
+                        ),
                     )
 
                     success, send_err = _do_send_email(
@@ -826,6 +918,8 @@ def send_emails():
                 else {}
             )
 
+            business_opening_styles = _build_opening_style_batch(len(business_emails))
+
             for i, business_email in enumerate(business_emails, 1):
                 try:
                     bet = business_email.get("type") or "business"
@@ -892,6 +986,10 @@ def send_emails():
                         extra_notes=_email_style_directives(
                             one_opp_mode=business_one_opp_mode,
                             strict_sf=strict_sf,
+                        ),
+                        variation_hint=(
+                            business_opening_styles[i - 1]
+                            if i - 1 < len(business_opening_styles) else ""
                         ),
                     )
 

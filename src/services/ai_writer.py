@@ -14,6 +14,7 @@ import html
 import json
 import logging
 import os
+import random
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -106,22 +107,36 @@ def _model() -> str:
     return (os.getenv("OPENAI_MODEL") or _DEFAULT_MODEL).strip() or _DEFAULT_MODEL
 
 
-def _temperature() -> float:
+def _temperature(jitter: bool = False) -> float:
+    """Read OPENAI_TEMPERATURE.
+
+    When ``jitter`` is True (i.e. we're inside a multi-email batch and need
+    variety across messages) we add a small upward bias plus a random offset
+    so each email lands on a meaningfully different point on the temperature
+    curve. This is the cheapest, lowest-risk way to keep five emails from
+    collapsing into the same opener / cadence.
+    """
     raw = (os.getenv("OPENAI_TEMPERATURE") or "").strip()
     if not raw:
-        return _DEFAULT_TEMPERATURE
-    try:
-        return max(0.0, min(2.0, float(raw)))
-    except ValueError:
-        return _DEFAULT_TEMPERATURE
+        base = _DEFAULT_TEMPERATURE
+    else:
+        try:
+            base = float(raw)
+        except ValueError:
+            base = _DEFAULT_TEMPERATURE
+    if jitter:
+        # Bias upward (variety > determinism) and add per-call jitter so
+        # successive emails in the same batch don't share an attractor.
+        base = base + 0.2 + random.uniform(-0.1, 0.25)
+    return max(0.0, min(2.0, base))
 
 
 def _name_from_email(addr: str) -> str:
     """Best-effort first-name guess from an email like 'jane.doe@acme.com'.
 
     Returns '' when the local-part doesn't look like a real name (contains
-    digits, is too short, etc.) so the caller can fall back to a generic
-    greeting like 'Hi there,' instead of producing 'Hi Kesavcbe23,'.
+    digits, is too short, etc.) so the caller can fall back to a bare
+    greeting like 'Hi,' instead of producing 'Hi Kesavcbe23,'.
     """
     a = (addr or "").strip()
     if "@" not in a:
@@ -182,6 +197,7 @@ def _build_messages(
     structured_record: Dict[str, Any],
     extra_notes: str,
     tone: str,
+    variation_hint: str = "",
 ) -> List[Dict[str, str]]:
     purpose_label = _PURPOSE_LABELS.get(purpose, "a professional business email")
 
@@ -198,7 +214,24 @@ def _build_messages(
         "render them as separate paragraphs in the email.\n"
         "5. If a 'Length' / 'Personal touch' / 'Tone' instruction appears in the user "
         "message's Additional notes, treat it as authoritative — it OVERRIDES the soft "
-        "defaults below.\n\n"
+        "defaults below.\n"
+        "6. ANTI-REPETITION (critical when several emails are generated together):\n"
+        "   - The OPENING SENTENCE of the body (the first sentence after any greeting) "
+        "must be distinct and specific. NEVER start with these worn-out phrases or any "
+        "trivial rewording of them: 'I hope this email finds you well', 'I hope you are "
+        "doing well', 'I hope you are having a great week', 'Hope this finds you well', "
+        "'Just checking in', 'I wanted to follow up', 'I am writing to', 'I am reaching "
+        "out to', 'Thank you for reaching out', 'I appreciate your time', 'I wanted to "
+        "touch base', 'I hope all is well'.\n"
+        "   - Vary the OPENING STRUCTURE: lead with a concrete fact, a forward-looking "
+        "line, an observation, a question the recipient owns, a brief acknowledgement, "
+        "or a status framing — pick whatever the 'Variation hint for THIS email' below "
+        "instructs, and never default to a hope/wellness opener.\n"
+        "   - Vary the SUBJECT structure too — do not lead every subject with the same "
+        "phrasing template (e.g. avoid always starting with 'Quick update on...').\n"
+        "   - Vary the SIGN-OFF phrasing across emails (e.g. 'Best regards', 'Best', "
+        "'Thanks', 'Talk soon', 'Warm regards') so a batch of emails doesn't all close "
+        "the same way. Pick whichever fits the tone of THIS email.\n\n"
         "Soft defaults (used only when the user message doesn't specify otherwise; "
         "always overridable by the team system prompt below if one is present):\n"
         "- 4 to 6 substantive paragraphs of 2 to 4 sentences each, warm and "
@@ -230,6 +263,17 @@ def _build_messages(
     sections: List[str] = []
     sections.append(f"Email purpose: {purpose_label}.")
     sections.append(f"Tone: {tone}.")
+    if variation_hint and variation_hint.strip():
+        # Place the variation hint near the top so the LLM weights it heavily
+        # when choosing the opening sentence and overall structure. This is
+        # the lever that prevents N emails in a batch from sharing the same
+        # opener / cadence.
+        sections.append(
+            "Variation hint for THIS email (authoritative — use to make the "
+            "opening sentence and structure clearly different from any other "
+            "email in this batch; do NOT echo the hint back, just follow its "
+            "framing):\n" + variation_hint.strip()
+        )
     if sender_name:
         sections.append(f"Sender (writing the email): {sender_name}")
     if recipient_name:
@@ -237,8 +281,10 @@ def _build_messages(
     else:
         sections.append(
             "Recipient name is UNKNOWN. If you choose to include a greeting, "
-            "use exactly 'Hi there,' — do NOT invent names like 'team', "
-            "'customer', 'friend', or anything similar."
+            "use EXACTLY 'Hi,' on its own line (just the word 'Hi' followed by "
+            "a comma — no placeholder noun after it). Do NOT use 'Hi there,', "
+            "'Hi team,', 'Hi customer,', 'Hi friend,', 'Hello team,', "
+            "'Dear team,', or any similar generic stand-in."
         )
     if subject_seed:
         sections.append(
@@ -381,7 +427,7 @@ def _render_plain_text(
     _ = subject  # kept in signature for API stability / future use
     lines: List[str] = []
     if not has_greeting:
-        greeting = f"Hi {recipient_name}," if recipient_name else "Hi there,"
+        greeting = f"Hi {recipient_name}," if recipient_name else "Hi,"
         lines.extend([greeting, ""])
     for p in paragraphs:
         lines.append(p)
@@ -412,17 +458,20 @@ def _render_html(
     has_signoff = bool(paragraphs) and _has_signoff(paragraphs[-1])
 
     safe_subj = html.escape(subject)
-    safe_recipient = html.escape(recipient_name or "there")
+    safe_recipient = html.escape(recipient_name) if recipient_name else ""
     safe_sender = html.escape(sender_name or "Your team")
 
     body_paragraphs = "\n".join(
         f'      <p style="margin:0 0 14px 0;line-height:1.55;white-space:pre-wrap;">{html.escape(p)}</p>'
         for p in paragraphs
     )
+    # When we don't have a real recipient name, render a bare "Hi," — never
+    # "Hi there," / "Hi team," / "Hi customer," etc.
+    greeting_text = f"Hi {safe_recipient}," if safe_recipient else "Hi,"
     greeting_html = (
         ""
         if has_greeting
-        else f'          <p style="margin:0 0 18px 0;font-size:15px;color:#1a1f2c;">Hi {safe_recipient},</p>\n'
+        else f'          <p style="margin:0 0 18px 0;font-size:15px;color:#1a1f2c;">{greeting_text}</p>\n'
     )
     signoff_html = (
         ""
@@ -462,10 +511,17 @@ def compose_email(
     structured_record: Optional[Dict[str, Any]] = None,
     extra_notes: str = "",
     tone: str = "warm, professional, concise",
+    variation_hint: str = "",
 ) -> Optional[Dict[str, Any]]:
     """
     Generate a complete email (subject + body paragraphs + plain text + html)
     using the LLM.
+
+    ``variation_hint``: optional per-email framing instruction (e.g. "open
+    with a forward-looking line tied to the close date"). When provided, the
+    hint is injected high in the user prompt and a small temperature jitter
+    is applied, so a batch of N emails produces N distinct openers instead
+    of N near-duplicates.
 
     Returns a dict with keys: ``subject``, ``paragraphs``, ``plain_text``,
     ``html_content``. Returns ``None`` on any failure so the caller can fall
@@ -490,16 +546,18 @@ def compose_email(
         structured_record=structured_record or {},
         extra_notes=extra_notes.strip(),
         tone=tone,
+        variation_hint=(variation_hint or "").strip(),
     )
 
     raw: str = ""
     last_err: Optional[Exception] = None
+    use_jitter = bool(variation_hint and variation_hint.strip())
     for attempt in range(2):
         try:
             resp = client.chat.completions.create(
                 model=_model(),
                 messages=messages,
-                temperature=_temperature(),
+                temperature=_temperature(jitter=use_jitter),
                 response_format={"type": "json_object"},
             )
             raw = (resp.choices[0].message.content or "").strip()
