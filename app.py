@@ -53,6 +53,14 @@ from services.sf_oauth import (
 from services.sf_live_account import resolve_account_bundle
 from services.ai_writer import compose_email as ai_compose_email, is_ai_enabled
 
+# Send INFO+ from our own modules to stderr so failures in OAuth / Graph / SMTP
+# show up in the terminal during development. Werkzeug configures its own
+# logger, but app-level loggers were silent before this.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -71,44 +79,71 @@ def _do_send_email(
     plain_text: str,
     cc: list = None,
     bcc: list = None,
-) -> bool:
+):
+    """Send a single email. Returns ``(success: bool, error: str)``.
+
+    ``error`` is empty on success; on failure it contains the most specific
+    message we have (Graph error body, SMTP exception text, etc.) so the
+    caller can show it in the UI.
+
+    NOTE: We deliberately drop the HTML body and only send plain text. The
+    upstream AI writer / legacy templates produce a styled HTML "card" that
+    makes the message look like marketing mail in the recipient's inbox.
+    Users wanted the emails to look like a normally typed message, so we
+    force plain-text on the wire for every send method.
+    """
     if not to_list:
-        return False
+        return False, "No recipient addresses"
     cc = list(cc or [])
     bcc = list(bcc or [])
+    # Force plain-text only — never pass the styled HTML body to the send
+    # backend. If plain_text is empty for some reason, fall back to a
+    # tag-stripped version of the HTML so we never send a blank body.
+    if not (plain_text and plain_text.strip()) and html_content:
+        plain_text = re.sub(r"<[^>]+>", "", html_content)
+        plain_text = re.sub(r"\n{3,}", "\n\n", plain_text).strip()
+    html_content = ""
     if send_method == "gmail":
         cid = os.getenv("GOOGLE_CLIENT_ID", "")
         cs = os.getenv("GOOGLE_CLIENT_SECRET", "")
         rt = session.get("google_refresh_token")
         from_addr = session.get("google_email", "")
         if not (cid and cs and rt and from_addr):
-            return False
-        return send_gmail(
+            return False, "Gmail not connected (missing client id/secret/refresh token)"
+        ok = send_gmail(
             cid, cs, rt, from_addr, to_list, subject, plain_text, html_content,
             cc=cc, bcc=bcc,
         )
+        return (True, "") if ok else (False, "Gmail send failed (see server logs)")
     if send_method == "outlook":
         rt = session.get("microsoft_refresh_token")
         if not rt:
-            return False
+            return False, "Outlook not connected (no refresh token in session)"
         at = get_microsoft_access_token(rt)
         if not at:
-            return False
-        return send_outlook(
+            return False, "Could not refresh Microsoft access token (re-connect Outlook)"
+        ok = send_outlook(
             at, to_list, subject, plain_text,
             html=html_content,
             cc=cc, bcc=bcc,
         )
+        if ok:
+            return True, ""
+        return False, getattr(send_outlook, "last_error", "") or "Graph send failed"
     if agent is None:
-        return False
-    return agent.email_service.send_email(
-        to_email=to_list,
-        subject=subject,
-        html_content=html_content,
-        plain_text=plain_text,
-        cc=cc,
-        bcc=bcc,
-    )
+        return False, "SMTP agent not initialised"
+    try:
+        ok = agent.email_service.send_email(
+            to_email=to_list,
+            subject=subject,
+            html_content=html_content,
+            plain_text=plain_text,
+            cc=cc,
+            bcc=bcc,
+        )
+        return (True, "") if ok else (False, "SMTP send returned False")
+    except Exception as e:  # noqa: BLE001
+        return False, f"SMTP error: {e}"
 
 
 def _as_bool(v):
@@ -419,19 +454,22 @@ def send_emails():
                         },
                     )
 
-                    success = _do_send_email(
+                    success, send_err = _do_send_email(
                         send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
                         cc=cc_list, bcc=bcc_list,
                     )
 
-                    all_emails.append({
+                    entry = {
                         'type': 'Opportunity',
                         'name': opp['opportunity_name'],
                         'status': 'Sent' if success else 'Failed',
-                        'number': i
-                    })
+                        'number': i,
+                    }
+                    if not success and send_err:
+                        entry['error'] = send_err
+                    all_emails.append(entry)
 
                 except Exception as e:
                     all_emails.append({
@@ -481,19 +519,22 @@ def send_emails():
                         },
                     )
 
-                    success = _do_send_email(
+                    success, send_err = _do_send_email(
                         send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
                         cc=cc_list, bcc=bcc_list,
                     )
 
-                    all_emails.append({
+                    entry = {
                         'type': 'Case',
                         'name': f"Case {case['case_number']}",
                         'status': 'Sent' if success else 'Failed',
-                        'number': i
-                    })
+                        'number': i,
+                    }
+                    if not success and send_err:
+                        entry['error'] = send_err
+                    all_emails.append(entry)
 
                 except Exception as e:
                     all_emails.append({
@@ -571,7 +612,7 @@ def send_emails():
                         ),
                     )
 
-                    success = _do_send_email(
+                    success, send_err = _do_send_email(
                         send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
@@ -591,12 +632,15 @@ def send_emails():
                         'demo_enquiry': 'Demo Enquiry',
                     }
 
-                    all_emails.append({
+                    entry = {
                         'type': type_names.get(business_email['type'], business_email['type']),
                         'name': email_content['subject'],
                         'status': 'Sent' if success else 'Failed',
-                        'number': i
-                    })
+                        'number': i,
+                    }
+                    if not success and send_err:
+                        entry['error'] = send_err
+                    all_emails.append(entry)
 
                 except Exception as e:
                     all_emails.append({

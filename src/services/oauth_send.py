@@ -67,7 +67,10 @@ def _addr_list(
             continue
         if isinstance(p, (list, tuple)):
             for x in p:
-                out.extend(_addr_list((x,)))
+                # Pass `x` directly (not as a 1-tuple) so the recursive call
+                # sees a string and exits via the else branch. Wrapping in
+                # `(x,)` re-enters this same branch forever — RecursionError.
+                out.extend(_addr_list(x))
         else:
             s = str(p).strip()
             if not s:
@@ -142,8 +145,12 @@ def send_outlook(
     cc: Optional[List[str]] = None,
     bcc: Optional[List[str]] = None,
 ) -> bool:
+    """Send via Microsoft Graph. On failure, stores the Graph error string on
+    ``send_outlook.last_error`` so callers can surface it to the user."""
+    send_outlook.last_error = ""  # type: ignore[attr-defined]
     to_list = _addr_list(to)
     if not to_list:
+        send_outlook.last_error = "No recipient addresses"  # type: ignore[attr-defined]
         return False
     cc = _addr_list(cc)
     bcc = _addr_list(bcc)
@@ -162,13 +169,22 @@ def send_outlook(
     if bcc:
         message["bccRecipients"] = [{"emailAddress": {"address": a}} for a in bcc]
     body = {"message": message}
-    r = requests.post(
-        url,
-        headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
-        json=body,
-        timeout=60,
-    )
+    try:
+        r = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+            json=body,
+            timeout=60,
+        )
+    except requests.RequestException as e:
+        send_outlook.last_error = f"network: {e}"  # type: ignore[attr-defined]
+        logger.error("Graph send network error: %s", e)
+        return False
     if r.status_code not in (200, 202, 204):
+        send_outlook.last_error = f"HTTP {r.status_code}: {r.text}"  # type: ignore[attr-defined]
         logger.error("Graph send failed: %s %s", r.status_code, r.text)
         return False
     return True
+
+
+send_outlook.last_error = ""  # type: ignore[attr-defined]

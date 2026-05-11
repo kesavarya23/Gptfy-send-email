@@ -910,10 +910,19 @@
                         // Map email type to CSS class
                         const typeClass = getTypeClass(email.type);
 
+                        const errEsc = (email.error || '')
+                            .replace(/&/g, '&amp;')
+                            .replace(/</g, '&lt;')
+                            .replace(/>/g, '&gt;');
+                        const errBlock = errEsc
+                            ? `<div class="email-error" style="margin-top:6px;color:#b00020;font-size:12px;white-space:pre-wrap;word-break:break-word;">${errEsc}</div>`
+                            : '';
+
                         item.innerHTML = `
                             <div class="email-info">
                                 <span class="email-type ${typeClass}">${email.type}</span>
                                 <strong>${email.name}</strong>
+                                ${errBlock}
                             </div>
                             <span class="email-status status-${email.status.toLowerCase()}">${email.status}</span>
                         `;
