@@ -415,11 +415,6 @@
         </div>
 
         <div class="form-container">
-            <div class="info-box">
-                <p><strong>📧 Gmail Users:</strong> Use App Password, not regular password</p>
-                <p><strong>🔗 Get App Password:</strong> <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a></p>
-            </div>
-
             <form id="emailForm">
                 <!-- Sender Information -->
                 <div class="form-section">
@@ -428,10 +423,11 @@
                     <div class="form-group">
                         <label>Send method</label>
                         <div class="segment-control segment-control-wide">
-                            <button type="button" class="segment-option" data-send="gmail" id="segGmail">Gmail (OAuth)</button>
-                            <button type="button" class="segment-option" data-send="outlook" id="segOutlook">Outlook (OAuth)</button>
+                            <button type="button" class="segment-option" data-send="gmail" id="segGmail">Gmail (OAuth)<span class="seg-check" id="segCheckGmail" style="display:none; color:#2e7d32; font-weight:700;"> ✓</span></button>
+                            <button type="button" class="segment-option" data-send="outlook" id="segOutlook">Outlook (OAuth)<span class="seg-check" id="segCheckOutlook" style="display:none; color:#2e7d32; font-weight:700;"> ✓</span></button>
                             <button type="button" class="segment-option active" data-send="smtp" id="segSmtp">SMTP (password)</button>
                         </div>
+                        <small style="color: #666; font-size: 12px; display: block; margin-top: 6px;">A ✓ means that provider is already signed in. Click the segment to pick which account actually sends — switching here does <strong>not</strong> disconnect the other one.</small>
                     </div>
                     <div id="panelGmail" class="sender-panel" style="display: none;">
                         <div class="info-box" id="gmailConfigHint" style="display: none;">
@@ -450,6 +446,10 @@
                         <button type="button" class="btn" id="btnDisconnectOutlook" style="display: none; width: auto; padding: 10px 20px; background: #666;">Disconnect</button>
                     </div>
                     <div id="panelSmtp" class="sender-panel">
+                        <div class="info-box" style="margin-bottom: 16px;">
+                            <p><strong>📧 Gmail Users:</strong> Use App Password, not regular password</p>
+                            <p><strong>🔗 Get App Password:</strong> <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a></p>
+                        </div>
                         <div class="form-group">
                             <label>Sender Email <span class="required">*</span></label>
                             <input type="email" id="sender_email" placeholder="your-email@gmail.com">
@@ -572,6 +572,9 @@
                     </div>
                 </div>
 
+                <div id="sendingAsBadge" style="margin: 16px 0 10px; padding: 12px 14px; background: #f0f4ff; border: 1px solid #c5cae9; border-radius: 8px; color: #333; font-size: 14px; line-height: 1.4;">
+                    Choose a send method above.
+                </div>
                 <button type="submit" class="btn" id="submitBtn">
                     🚀 Send Emails
                 </button>
@@ -609,6 +612,7 @@
     </div>
 
     <script>
+        let _lastAuthStatus = {};
         function getSendMethod() {
             if (document.getElementById('segGmail').classList.contains('active')) return 'gmail';
             if (document.getElementById('segOutlook').classList.contains('active')) return 'outlook';
@@ -619,10 +623,55 @@
             document.getElementById('panelOutlook').style.display = mode === 'outlook' ? 'block' : 'none';
             document.getElementById('panelSmtp').style.display = mode === 'smtp' ? 'block' : 'none';
         }
+        function updateSegmentChecks() {
+            const s = _lastAuthStatus || {};
+            const gC = document.getElementById('segCheckGmail');
+            const oC = document.getElementById('segCheckOutlook');
+            if (gC) gC.style.display = s.gmail_connected ? 'inline' : 'none';
+            if (oC) oC.style.display = s.outlook_connected ? 'inline' : 'none';
+        }
+        function updateSendingAsBadge() {
+            const el = document.getElementById('sendingAsBadge');
+            if (!el) return;
+            const method = getSendMethod();
+            const s = _lastAuthStatus || {};
+            const sEmail = (document.getElementById('sender_email') || {}).value || '';
+            if (method === 'gmail') {
+                if (s.gmail_connected) {
+                    el.style.background = '#e8f5e9';
+                    el.style.borderColor = '#a5d6a7';
+                    el.innerHTML = '✉️ Sending as: <strong>' + (s.gmail_email || '(connected Gmail)') + '</strong> &nbsp;·&nbsp; via Gmail OAuth' +
+                        (s.outlook_connected ? '<br><small style="color:#555;">Outlook is also connected (' + s.outlook_email + ') but inactive — click the Outlook segment to use it instead.</small>' : '');
+                } else {
+                    el.style.background = '#fff3e0';
+                    el.style.borderColor = '#ffcc80';
+                    el.innerHTML = '⚠️ Gmail is selected but <strong>not connected</strong>. Click <strong>Connect Google</strong> above first, or pick a different send method.';
+                }
+            } else if (method === 'outlook') {
+                if (s.outlook_connected) {
+                    el.style.background = '#e8f5e9';
+                    el.style.borderColor = '#a5d6a7';
+                    el.innerHTML = '✉️ Sending as: <strong>' + (s.outlook_email || '(connected Outlook)') + '</strong> &nbsp;·&nbsp; via Outlook OAuth' +
+                        (s.gmail_connected ? '<br><small style="color:#555;">Gmail is also connected (' + s.gmail_email + ') but inactive — click the Gmail segment to use it instead.</small>' : '');
+                } else {
+                    el.style.background = '#fff3e0';
+                    el.style.borderColor = '#ffcc80';
+                    el.innerHTML = '⚠️ Outlook is selected but <strong>not connected</strong>. Click <strong>Connect Microsoft</strong> above first, or pick a different send method.';
+                }
+            } else {
+                el.style.background = '#f0f4ff';
+                el.style.borderColor = '#c5cae9';
+                const who = sEmail ? '<strong>' + sEmail + '</strong>' : 'the address you enter below';
+                el.innerHTML = '✉️ Sending as: ' + who + ' &nbsp;·&nbsp; via SMTP (app password)';
+            }
+        }
         function authStatusRefresh() {
             fetch('/api/auth/status')
                 .then(r => r.json())
                 .then(s => {
+                    _lastAuthStatus = s || {};
+                    updateSegmentChecks();
+                    updateSendingAsBadge();
                     const gH = document.getElementById('gmailConfigHint');
                     const oH = document.getElementById('outlookConfigHint');
                     gH.style.display = s.google_configured ? 'none' : 'block';
@@ -742,19 +791,26 @@
             document.getElementById('segOutlook').classList.remove('active');
             document.getElementById('segSmtp').classList.remove('active');
             setSendMethodPanel('gmail');
+            updateSendingAsBadge();
         });
         document.getElementById('segOutlook').addEventListener('click', function() {
             document.getElementById('segOutlook').classList.add('active');
             document.getElementById('segGmail').classList.remove('active');
             document.getElementById('segSmtp').classList.remove('active');
             setSendMethodPanel('outlook');
+            updateSendingAsBadge();
         });
         document.getElementById('segSmtp').addEventListener('click', function() {
             document.getElementById('segSmtp').classList.add('active');
             document.getElementById('segGmail').classList.remove('active');
             document.getElementById('segOutlook').classList.remove('active');
             setSendMethodPanel('smtp');
+            updateSendingAsBadge();
         });
+        (function() {
+            const senderEl = document.getElementById('sender_email');
+            if (senderEl) senderEl.addEventListener('input', updateSendingAsBadge);
+        })();
         document.addEventListener('DOMContentLoaded', function() {
             authStatusRefresh();
             if (new URLSearchParams(window.location.search).get('gmail') === 'connected' || new URLSearchParams(window.location.search).get('gmail') === 'ok') {

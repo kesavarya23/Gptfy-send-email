@@ -77,6 +77,54 @@ def _fmt_money(v: Any) -> str:
         return str(v)
 
 
+def structure_opportunity(o: Dict[str, Any], account_name: str = "") -> Dict[str, Any]:
+    """
+    Project a raw SOQL Opportunity record into the slim shape used downstream
+    (email composer + AI writer). Always includes a ``brief_text`` field that
+    describes this single opportunity on its own — that's what we feed into
+    the AI as ``opportunity_text`` when sending one-email-per-opportunity, so
+    each email focuses on exactly one real deal instead of the whole list.
+    """
+    name = (o.get("Name") or "Opportunity").strip()
+    stage = (o.get("StageName") or "").strip()
+    amount_raw = o.get("Amount")
+    amount_str = _fmt_money(amount_raw)
+    close_date = o.get("CloseDate") or ""
+    next_step = (o.get("NextStep") or "").strip()
+    probability = o.get("Probability")
+
+    parts = [name]
+    if stage:
+        parts.append(f"Stage: {stage}")
+    if amount_str:
+        parts.append(f"Amount: ${amount_str}")
+    if close_date:
+        parts.append(f"Close date: {close_date}")
+    if probability is not None:
+        try:
+            parts.append(f"Probability: {int(float(probability))}%")
+        except (TypeError, ValueError):
+            pass
+    brief_lines = [" — ".join(parts)]
+    if account_name:
+        brief_lines.append(f"Account: {account_name}")
+    if next_step:
+        brief_lines.append(f"Next step: {next_step[:500]}")
+    brief_text = "\n".join(brief_lines).strip()
+
+    return {
+        "name": name,
+        "account_name": account_name,
+        "stage": stage,
+        "amount": amount_raw,
+        "amount_str": amount_str,
+        "close_date": close_date,
+        "probability": probability,
+        "next_step": next_step,
+        "brief_text": brief_text,
+    }
+
+
 def format_account_and_opportunities(
     account: Dict[str, Any],
     opps: List[Dict[str, Any]],
@@ -141,10 +189,26 @@ def format_account_and_opportunities(
     return name, "\n".join(lines).strip()
 
 
+def _structured_open_opportunities(
+    opps: List[Dict[str, Any]], account_name: str
+) -> List[Dict[str, Any]]:
+    """Return only OPEN opps as slim dicts the email pipeline can iterate over."""
+    return [
+        structure_opportunity(o, account_name=account_name)
+        for o in opps
+        if not o.get("IsClosed")
+    ]
+
+
 def resolve_account_bundle(sf, lookup: str) -> Dict[str, Any]:
     """
     lookup: 15/18-char Account Id, or exact Account Name (single match).
-    Returns dict with keys: ok, account_name, opportunity_text, matches?, error?
+    Returns dict with keys: ok, account_name, opportunity_text, opportunities,
+    matches?, error?
+
+    ``opportunities`` is a list of slim per-opp dicts (only open opps), so the
+    email sender can iterate one-email-per-opportunity instead of cramming the
+    whole list into a single text blob.
     """
     raw = (lookup or "").strip()
     if not raw:
@@ -161,6 +225,7 @@ def resolve_account_bundle(sf, lookup: str) -> Dict[str, Any]:
             "account_id": acc.get("Id"),
             "account_name": aname,
             "opportunity_text": obrief,
+            "opportunities": _structured_open_opportunities(opps, aname),
         }
 
     matches = find_accounts_by_name(sf, raw)
@@ -196,4 +261,5 @@ def resolve_account_bundle(sf, lookup: str) -> Dict[str, Any]:
         "account_id": acc_full.get("Id"),
         "account_name": aname,
         "opportunity_text": obrief,
+        "opportunities": _structured_open_opportunities(opps, aname),
     }

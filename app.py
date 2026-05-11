@@ -23,6 +23,7 @@ import re
 import html as html_lib
 import hashlib
 import base64
+import random
 import requests
 sys.path.append('src')
 
@@ -490,7 +491,6 @@ def send_emails():
 
         # Generate and send opportunities
         if num_opportunities > 0:
-            opportunities = data_generator.generate_opportunities(num_opportunities)
             # Always forward whatever Salesforce context was loaded into the form
             # (via /api/salesforce/account) to the LLM, regardless of the
             # "use custom context" toggle. That toggle only controls the legacy
@@ -499,8 +499,83 @@ def send_emails():
             sf_account_for_ai = (data.get("account_name") or "").strip()
             sf_opp_for_ai = (data.get("opportunity_text") or "").strip()
 
-            for i, opp in enumerate(opportunities, 1):
+            # Prefer the real per-opportunity list cached by /api/salesforce/account
+            # so we can send ONE email per real opp instead of a single context
+            # blob duplicated across N emails. We only trust the cache when the
+            # account name in the form still matches the one we loaded against —
+            # if the user edited it manually, fall through to legacy generation.
+            cached_opps = session.get("sf_account_opportunities") or []
+            cached_account = (session.get("sf_account_name_loaded") or "").strip()
+            use_real_opps = bool(
+                cached_opps
+                and cached_account
+                and sf_account_for_ai
+                and cached_account.lower() == sf_account_for_ai.lower()
+            )
+
+            if use_real_opps:
+                # Randomise once per send so a single-email request picks a
+                # random opp, and a multi-email request gets a randomised
+                # order. We cycle if the user asked for more emails than the
+                # account has open opps (so 10 emails on 6 opps = each of the
+                # 6 at least once, then 4 repeats in shuffled order).
+                shuffled = list(cached_opps)
+                random.shuffle(shuffled)
+                opps_for_send = [
+                    shuffled[i % len(shuffled)] for i in range(num_opportunities)
+                ]
+                # Tag each row with a 1-based source index so the result list
+                # shows e.g. "Opportunity 3 of 6" even when we sample/cycle.
+                source_index_by_name = {
+                    o.get("name"): idx + 1 for idx, o in enumerate(cached_opps)
+                }
+            else:
+                # Legacy fallback: synthetic random opportunities as before.
+                opps_for_send = data_generator.generate_opportunities(num_opportunities)
+                source_index_by_name = {}
+
+            for i, opp in enumerate(opps_for_send, 1):
                 try:
+                    if use_real_opps:
+                        opp_name = opp.get("name") or "Opportunity"
+                        opp_account = opp.get("account_name") or sf_account_for_ai
+                        # Per-opp brief: just THIS opp's facts, not the whole list.
+                        # That's what guarantees the LLM writes the email about
+                        # exactly one real deal instead of mixing all of them.
+                        per_opp_text = opp.get("brief_text") or ""
+                        subject_seed = (
+                            f"Salesforce Opportunity Update: {opp_name}".strip()
+                        )
+                        structured_record = {
+                            "opportunity_name": opp_name,
+                            "account_name": opp_account,
+                            "stage": opp.get("stage"),
+                            "amount": opp.get("amount"),
+                            "amount_display": opp.get("amount_str"),
+                            "close_date": opp.get("close_date"),
+                            "probability": opp.get("probability"),
+                            "next_step": opp.get("next_step"),
+                        }
+                        result_name = opp_name
+                    else:
+                        opp_name = opp.get("opportunity_name", "Unknown")
+                        opp_account = opp.get("account_name") or sf_account_for_ai
+                        per_opp_text = sf_opp_for_ai
+                        subject_seed = (
+                            f"Salesforce Opportunity Update: {opp_name}".strip()
+                        )
+                        structured_record = {
+                            "opportunity_name": opp_name,
+                            "account_name": opp_account,
+                            "stage": opp.get("stage"),
+                            "amount": opp.get("amount"),
+                            "close_date": opp.get("close_date"),
+                            "owner_name": opp.get("owner_name"),
+                            "probability": opp.get("probability"),
+                            "next_step": opp.get("next_step"),
+                        }
+                        result_name = opp_name
+
                     email_content = _maybe_ai_email(
                         purpose="opportunity",
                         fallback=lambda o=opp: email_generator.generate_opportunity_email(
@@ -509,20 +584,18 @@ def send_emails():
                         ),
                         to_list=to_list,
                         sender_name=sender_name,
-                        subject_seed=f"Salesforce Opportunity Update: {opp.get('opportunity_name', '')}".strip(),
+                        subject_seed=subject_seed,
                         user_message=custom_message,
-                        account_name=sf_account_for_ai or (opp.get("account_name") or ""),
-                        opportunity_text=sf_opp_for_ai,
-                        structured_record={
-                            "opportunity_name": opp.get("opportunity_name"),
-                            "account_name": opp.get("account_name"),
-                            "stage": opp.get("stage_name"),
-                            "amount": opp.get("amount"),
-                            "close_date": opp.get("close_date"),
-                            "owner_name": opp.get("owner_name"),
-                            "probability": opp.get("probability"),
-                            "next_step": opp.get("next_step"),
-                        },
+                        account_name=opp_account,
+                        opportunity_text=per_opp_text,
+                        structured_record=structured_record,
+                        extra_notes=(
+                            "Write this email about EXACTLY ONE opportunity — the one "
+                            "described in the structured record and opportunity context "
+                            "above. Do not reference, list, or compare other deals."
+                            if use_real_opps
+                            else ""
+                        ),
                     )
 
                     success, send_err = _do_send_email(
@@ -534,10 +607,17 @@ def send_emails():
 
                     entry = {
                         'type': 'Opportunity',
-                        'name': opp['opportunity_name'],
+                        'name': result_name,
                         'status': 'Sent' if success else 'Failed',
                         'number': i,
                     }
+                    if use_real_opps and source_index_by_name:
+                        src_idx = source_index_by_name.get(result_name)
+                        if src_idx:
+                            entry['source'] = (
+                                f"Opportunity {src_idx} of {len(cached_opps)} "
+                                f"from {cached_account}"
+                            )
                     if not success and send_err:
                         entry['error'] = send_err
                     all_emails.append(entry)
@@ -545,7 +625,11 @@ def send_emails():
                 except Exception as e:
                     all_emails.append({
                         'type': 'Opportunity',
-                        'name': opp.get('opportunity_name', 'Unknown'),
+                        'name': (
+                            opp.get("name")
+                            if use_real_opps
+                            else opp.get('opportunity_name', 'Unknown')
+                        ),
                         'status': 'Failed',
                         'error': str(e),
                         'number': i
@@ -1018,13 +1102,27 @@ def salesforce_fetch_account():
         })
 
     if not result.get("ok"):
+        # On any failure, drop any stale cached opps so we never use them
+        # against the wrong account.
+        session.pop("sf_account_opportunities", None)
+        session.pop("sf_account_name_loaded", None)
         return jsonify({"success": False, "error": result.get("error") or "Lookup failed."}), 400
+
+    # Persist the structured per-opp list in the session so /send_emails can
+    # iterate one-email-per-opportunity. We also remember the account name we
+    # loaded against, so we only use these opps when the user keeps that same
+    # account in the form (a manual edit invalidates the cache).
+    opportunities = result.get("opportunities") or []
+    aname = result.get("account_name") or ""
+    session["sf_account_opportunities"] = opportunities
+    session["sf_account_name_loaded"] = aname
 
     return jsonify({
         "success": True,
         "account_id": result.get("account_id"),
-        "account_name": result.get("account_name"),
+        "account_name": aname,
         "opportunity_text": result.get("opportunity_text"),
+        "opportunity_count": len(opportunities),
     })
 
 
@@ -1053,6 +1151,10 @@ def auth_disconnect():
         session.pop("salesforce_org_id", None)
         session.pop("salesforce_org_name", None)
         session.pop("salesforce_display_name", None)
+        # Drop the cached per-account opportunity list — it belongs to the
+        # disconnected org and must never leak into a different connection.
+        session.pop("sf_account_opportunities", None)
+        session.pop("sf_account_name_loaded", None)
         # Also drop saved Connected App credentials so the user can paste a new org.
         clear_sf_oauth_config(session)
     if request.is_json or request.path.endswith("disconnect"):
