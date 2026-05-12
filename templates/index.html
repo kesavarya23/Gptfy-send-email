@@ -686,15 +686,11 @@
                 <div class="form-section" id="replyMailboxSection">
                     <h2>📥 Reply mailboxes (test contacts)</h2>
                     <p style="color: #666; font-size: 14px; margin-bottom: 12px;">
-                        Connect the Gmail / Outlook accounts you'll use as test "contacts". After sending an email, the <strong>Get reply</strong> button on each recipient row will fire a real AI-generated reply from that contact's mailbox back to the sender — so workspace sync sees a genuine inbound message.
+                        Connect Gmail / Outlook accounts as test contacts so the <strong>Get reply</strong> button can fire real inbound replies.
                     </p>
-                    <div id="replyMailboxList" style="margin-bottom: 12px; font-size: 14px;">
-                        <em style="color: #888;">Loading connected mailboxes…</em>
-                    </div>
                     <div>
                         <a href="/reply_mailboxes/setup" class="btn" id="linkManageReplyMailboxes" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 18px;">⚙️ Manage contact mailboxes</a>
                     </div>
-                    <small id="replyMailboxHint" style="color: #888; display: block; margin-top: 10px;"></small>
                 </div>
 
                 <!-- Optional Salesforce context (left column) -->
@@ -862,41 +858,13 @@
         }
 
         async function refreshReplyMailboxesList() {
-            const listEl = document.getElementById('replyMailboxList');
-            const hintEl = document.getElementById('replyMailboxHint');
-            if (!listEl) return;
+            // The list is rendered on /reply_mailboxes/setup. On the main
+            // page we only need the in-memory cache so the per-recipient
+            // "Get reply" buttons know which contacts are connected.
             try {
-                const r = await fetch('/api/reply_mailboxes');
+                const r = await fetch('/api/reply_mailboxes', { cache: 'no-store' });
                 const j = await r.json();
-                if (!j.success) {
-                    _replyMailboxes = [];
-                    listEl.innerHTML = '<em style="color:#c62828;">' + escapeHtml(j.error || 'Could not load mailboxes') + '</em>';
-                    if (hintEl) hintEl.textContent = j.error && /database/i.test(j.error) ? 'Set DATABASE_URL in .env to enable reply testing.' : '';
-                    return;
-                }
-                _replyMailboxes = j.mailboxes || [];
-                if (!_replyMailboxes.length) {
-                    listEl.innerHTML = '<em style="color:#888;">No contact mailboxes connected yet. Add one below.</em>';
-                } else {
-                    listEl.innerHTML = _replyMailboxes.map(m => {
-                        const prov = (m.provider || '').toLowerCase();
-                        return '<div class="reply-mailbox-row">' +
-                            '<span><span class="rmb-provider ' + escapeHtml(prov) + '">' + escapeHtml(prov || '?') + '</span>' +
-                            '<strong>' + escapeHtml(m.email) + '</strong>' +
-                            (m.display_name ? ' <span class="rmb-meta">— ' + escapeHtml(m.display_name) + '</span>' : '') +
-                            '</span>' +
-                            '<button type="button" data-email="' + escapeHtml(m.email) + '" class="rmb-delete">Forget</button>' +
-                            '</div>';
-                    }).join('');
-                    listEl.querySelectorAll('.rmb-delete').forEach(b => {
-                        b.addEventListener('click', async function () {
-                            if (!confirm('Forget reply mailbox ' + this.dataset.email + '? You can reconnect any time.')) return;
-                            await fetch('/api/reply_mailboxes/' + encodeURIComponent(this.dataset.email), { method: 'DELETE' });
-                            refreshReplyMailboxesList();
-                        });
-                    });
-                }
-                if (hintEl) hintEl.textContent = '';
+                _replyMailboxes = j.success ? (j.mailboxes || []) : [];
                 document.querySelectorAll('.btn-reply[data-email]').forEach(b => {
                     if (b.dataset.replyState === 'sent') return;
                     const email = (b.dataset.email || '').toLowerCase();
@@ -907,7 +875,7 @@
                     b.title = isConnected ? '' : 'Connect ' + b.dataset.email + ' as a reply mailbox first.';
                 });
             } catch (err) {
-                listEl.innerHTML = '<em style="color:#c62828;">Failed to load: ' + escapeHtml(err.message) + '</em>';
+                _replyMailboxes = [];
             }
         }
 

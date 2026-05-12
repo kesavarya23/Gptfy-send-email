@@ -130,6 +130,12 @@ def list_reply_mailboxes() -> List[Dict[str, Any]]:
 
 
 def delete_reply_mailbox(email: str) -> bool:
+    """Delete a reply mailbox. Returns True only when a row was actually removed.
+
+    Returning ``cur.rowcount > 0`` (instead of an unconditional ``True``)
+    means the API can honestly tell the UI "nothing was deleted" — useful
+    when the email casing / spelling drifts between list and delete.
+    """
     if not is_db_enabled() or not email:
         return False
     try:
@@ -138,7 +144,7 @@ def delete_reply_mailbox(email: str) -> bool:
                 "DELETE FROM reply_mailboxes WHERE email = %s",
                 (email.lower().strip(),),
             )
-        return True
+            return (cur.rowcount or 0) > 0
     except Exception as e:  # noqa: BLE001
         logger.error("delete_reply_mailbox failed: %s", e)
         return False

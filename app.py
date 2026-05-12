@@ -1701,9 +1701,16 @@ def auth_disconnect():
 
 @app.route("/api/reply_mailboxes", methods=["GET"])
 def list_reply_mailboxes_endpoint():
-    """Return the list of OAuth-connected test contact mailboxes."""
+    """Return the list of OAuth-connected test contact mailboxes.
+
+    The response is marked ``Cache-Control: no-store`` so a browser can
+    never serve a stale list after the user clicks Forget on the manage
+    page — every refresh hits the DB.
+    """
     if not repdb.is_db_enabled():
-        return jsonify({"success": False, "error": "Database not configured", "mailboxes": []})
+        resp = jsonify({"success": False, "error": "Database not configured", "mailboxes": []})
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
     rows = repdb.list_reply_mailboxes()
     mailboxes = []
     for r in rows:
@@ -1714,16 +1721,32 @@ def list_reply_mailboxes_endpoint():
             "connected_at": r.get("connected_at").isoformat() if r.get("connected_at") else "",
             "last_used_at": r.get("last_used_at").isoformat() if r.get("last_used_at") else "",
         })
-    return jsonify({"success": True, "mailboxes": mailboxes})
+    resp = jsonify({"success": True, "mailboxes": mailboxes})
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
-@app.route("/api/reply_mailboxes/<email>", methods=["DELETE"])
+@app.route("/api/reply_mailboxes/<path:email>", methods=["DELETE"])
 def delete_reply_mailbox_endpoint(email):
-    """Disconnect / forget a test contact mailbox."""
+    """Disconnect / forget a test contact mailbox.
+
+    ``<path:email>`` (instead of the default string converter) avoids any
+    edge case where Flask might object to an email-shaped path segment,
+    and ``delete_reply_mailbox`` now reports whether a row was actually
+    removed so the caller can tell "deleted" from "no such mailbox".
+    """
     if not repdb.is_db_enabled():
         return jsonify({"success": False, "error": "Database not configured"}), 503
-    ok = repdb.delete_reply_mailbox(email)
-    return jsonify({"success": ok})
+    target = (email or "").strip()
+    if not target:
+        return jsonify({"success": False, "error": "Email is required"}), 400
+    ok = repdb.delete_reply_mailbox(target)
+    if not ok:
+        return jsonify({
+            "success": False,
+            "error": f"No reply mailbox found for {target}",
+        }), 404
+    return jsonify({"success": True})
 
 
 def _build_reply_recipients(

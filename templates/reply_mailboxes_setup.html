@@ -247,7 +247,7 @@
             const listEl = document.getElementById('replyMailboxList');
             if (!listEl) return;
             try {
-                const r = await fetch('/api/reply_mailboxes');
+                const r = await fetch('/api/reply_mailboxes', { cache: 'no-store' });
                 const j = await r.json();
                 if (!j.success) {
                     listEl.innerHTML = '<div class="mailbox-empty" style="color:#c62828;">'
@@ -273,9 +273,31 @@
                 }).join('');
                 listEl.querySelectorAll('.rmb-delete').forEach(function (b) {
                     b.addEventListener('click', async function () {
-                        if (!confirm('Forget reply mailbox ' + this.dataset.email + '? You can reconnect any time.')) return;
-                        await fetch('/api/reply_mailboxes/' + encodeURIComponent(this.dataset.email), { method: 'DELETE' });
-                        refreshList();
+                        const target = this.dataset.email;
+                        if (!confirm('Forget reply mailbox ' + target + '? You can reconnect any time.')) return;
+                        this.disabled = true;
+                        const original = this.textContent;
+                        this.textContent = 'Forgetting…';
+                        try {
+                            const resp = await fetch('/api/reply_mailboxes/' + encodeURIComponent(target), {
+                                method: 'DELETE',
+                                cache: 'no-store',
+                            });
+                            const data = await resp.json().catch(function () { return {}; });
+                            if (!resp.ok || !data.success) {
+                                showBanner('error', 'Could not forget ' + target + (data.error ? ' — ' + data.error : '') + '.');
+                                this.disabled = false;
+                                this.textContent = original;
+                                return;
+                            }
+                            showBanner('success', '✓ Forgot ' + target);
+                        } catch (err) {
+                            showBanner('error', 'Could not forget ' + target + ' — ' + err.message);
+                            this.disabled = false;
+                            this.textContent = original;
+                            return;
+                        }
+                        await refreshList();
                     });
                 });
             } catch (err) {
