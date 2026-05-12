@@ -279,10 +279,11 @@
                         const original = this.textContent;
                         this.textContent = 'Forgetting…';
                         try {
-                            const resp = await fetch('/api/reply_mailboxes/' + encodeURIComponent(target), {
-                                method: 'DELETE',
-                                cache: 'no-store',
-                            });
+                            const resp = await fetch(
+                                '/api/reply_mailboxes/' + encodeURIComponent(target)
+                                    + '?email=' + encodeURIComponent(target),
+                                { method: 'DELETE', cache: 'no-store' }
+                            );
                             const data = await resp.json().catch(function () { return {}; });
                             if (!resp.ok || !data.success) {
                                 showBanner('error', 'Could not forget ' + target + (data.error ? ' — ' + data.error : '') + '.');

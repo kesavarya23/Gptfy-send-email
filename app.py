@@ -25,6 +25,7 @@ import hashlib
 import base64
 import random
 import requests
+from typing import Optional
 sys.path.append('src')
 
 from agent import EmailAgent
@@ -1727,17 +1728,26 @@ def list_reply_mailboxes_endpoint():
 
 
 @app.route("/api/reply_mailboxes/<path:email>", methods=["DELETE"])
-def delete_reply_mailbox_endpoint(email):
+@app.route("/api/reply_mailboxes", methods=["DELETE"])
+def delete_reply_mailbox_endpoint(email: str = ""):
     """Disconnect / forget a test contact mailbox.
 
-    ``<path:email>`` (instead of the default string converter) avoids any
-    edge case where Flask might object to an email-shaped path segment,
-    and ``delete_reply_mailbox`` now reports whether a row was actually
+    Flask/Werkzeug does not always percent-decode the URL segment passed
+    into a ``<path:>`` converter (it leaves ``%40`` literal in the value
+    we receive), so the email arriving as ``yuvanmoorthy66%40gmail.com``
+    never matched the stored ``yuvanmoorthy66@gmail.com`` row. We accept
+    either the path form OR an ``?email=`` query/JSON body, and run an
+    explicit ``urllib.parse.unquote`` so the ``@`` always reaches the DB
+    intact.
+
+    ``delete_reply_mailbox`` now reports whether a row was actually
     removed so the caller can tell "deleted" from "no such mailbox".
     """
     if not repdb.is_db_enabled():
         return jsonify({"success": False, "error": "Database not configured"}), 503
-    target = (email or "").strip()
+    body = request.get_json(silent=True) or {}
+    raw = email or request.args.get("email") or body.get("email") or ""
+    target = urllib.parse.unquote(str(raw)).strip()
     if not target:
         return jsonify({"success": False, "error": "Email is required"}), 400
     ok = repdb.delete_reply_mailbox(target)
@@ -1746,24 +1756,65 @@ def delete_reply_mailbox_endpoint(email):
             "success": False,
             "error": f"No reply mailbox found for {target}",
         }), 404
-    return jsonify({"success": True})
+    return jsonify({"success": True, "email": target.lower()})
 
 
 def _build_reply_recipients(
     *,
     send_row: dict,
+    parent_row: Optional[dict],
     replier_email: str,
     mode: str,
 ) -> tuple:
     """Compute the To and Cc lists for a reply from ``replier_email``.
 
-    - **Reply**     → To = original sender only; Cc = (none)
-    - **Reply All** → To = original sender; Cc = (original To + original Cc)
-                      minus the replier and minus the sender. BCCs are never
-                      included (the replier never saw them).
+    Two cases:
+
+    1. **Direct reply to the original send** (``parent_row`` is ``None``):
+       - Reply     → To = original sender only; Cc = (none)
+       - Reply All → To = original sender; Cc = (original To + original Cc)
+                     minus the replier and minus the sender.
+
+    2. **Reply to a previous reply** (``parent_row`` is a row from
+       ``replies``): we MUST target the person who wrote that parent reply,
+       not the original sender. Otherwise A → B (original), B → A (parent
+       reply), A's "reply to that reply" would loop back to A. (That was
+       the bug producing self-emails in the screenshots.)
+       - Reply     → To = parent reply's author (``parent_row.replier_email``)
+       - Reply All → also Cc = (parent reply's To + Cc) minus replier
+                     and minus the parent's author.
+
+    BCCs from the original send are never re-broadcast (the replier never
+    saw them).
     """
-    sender = (send_row.get("sender_email") or "").strip().lower()
     replier = (replier_email or "").strip().lower()
+
+    if parent_row:
+        target = (parent_row.get("replier_email") or "").strip().lower()
+        if not target:
+            return ([], [])
+        to_list = [target]
+        if mode != "reply_all":
+            return (to_list, [])
+        others = []
+        for emails_str in (
+            parent_row.get("to_emails") or "",
+            parent_row.get("cc_emails") or "",
+        ):
+            for chunk in str(emails_str).split(","):
+                e = chunk.strip().lower()
+                if e and e != replier and e != target:
+                    others.append(e)
+        seen = set()
+        deduped = []
+        for a in others:
+            if a in seen:
+                continue
+            seen.add(a)
+            deduped.append(a)
+        return (to_list, deduped)
+
+    sender = (send_row.get("sender_email") or "").strip().lower()
     if not sender:
         return ([], [])
     to_list = [sender]
@@ -1789,6 +1840,48 @@ def _build_reply_recipients(
         seen.add(a)
         deduped.append(a)
     return (to_list, deduped)
+
+
+def _build_references_chain(send_row: dict, parent_row: Optional[dict]) -> str:
+    """Return the RFC 5322 ``References`` header value for a reply.
+
+    Per RFC 5322 §3.6.4 the ``References`` header lists every Message-Id
+    that came before this one in the thread, oldest first. A correctly
+    populated ``References`` header is the single biggest factor that
+    determines whether Gmail / Outlook / Apple Mail group new messages
+    into the existing conversation — using only the immediate parent's id
+    (which is what the previous code did) makes long chains drop out of
+    thread view.
+
+    Order produced:
+        <root send message-id>  <oldest reply id> ... <parent reply id>
+    """
+    chain = []
+    root_id = (send_row.get("message_id") or "").strip()
+    if root_id:
+        chain.append(root_id)
+
+    if parent_row:
+        ancestors = []
+        cursor = parent_row
+        depth = 0
+        while cursor and depth < 30:
+            mid = (cursor.get("message_id") or "").strip()
+            if mid:
+                ancestors.append(mid)
+            pid = cursor.get("parent_reply_id")
+            cursor = repdb.get_reply(pid) if pid else None
+            depth += 1
+        chain.extend(reversed(ancestors))
+
+    seen = set()
+    out = []
+    for x in chain:
+        if not x or x in seen:
+            continue
+        seen.add(x)
+        out.append(x)
+    return " ".join(out)
 
 
 @app.route("/api/get_reply", methods=["POST"])
@@ -1925,11 +2018,22 @@ def get_reply_endpoint():
 
     to_list, cc_list = _build_reply_recipients(
         send_row=send_row,
+        parent_row=parent_row,
         replier_email=replier_email,
         mode=mode,
     )
     if not to_list:
-        return jsonify({"success": False, "error": "Could not determine reply recipient (no original sender on file)"}), 400
+        return jsonify({
+            "success": False,
+            "error": (
+                "Could not determine reply recipient. "
+                "When replying to a previous reply, the parent reply has no "
+                "author email on file; for a direct reply, no original sender "
+                "is recorded on this send."
+            ),
+        }), 400
+
+    references_header = _build_references_chain(send_row, parent_row)
 
     reply_id = secrets.token_urlsafe(12)
     new_message_id = ""
@@ -1961,7 +2065,7 @@ def get_reply_endpoint():
             cc=cc_list,
             message_id=new_msg_id,
             in_reply_to=in_reply_to_id or None,
-            references=in_reply_to_id or None,
+            references=references_header or in_reply_to_id or None,
             thread_id=thread_id or None,
             extra_headers={"X-Gptfy-Reply-Id": reply_id, "X-Gptfy-Send-Id": send_id},
         )

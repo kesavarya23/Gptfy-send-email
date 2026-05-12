@@ -955,12 +955,10 @@
                     block.innerHTML = '<div style="font-size:12px;font-weight:600;color:#444;margin-bottom:6px;">Generate a reply from any recipient mailbox:</div>';
                     all.forEach((rcp, i) => {
                         const rowId = 'rcp-' + idx + '-' + i;
-                        const role = rcp.role || 'to';
                         const row = document.createElement('div');
                         row.className = 'recipient-row';
                         row.dataset.email = rcp.email;
                         row.innerHTML =
-                            '<span class="recipient-role role-' + role + '">' + role.toUpperCase() + '</span>' +
                             '<span class="rcp-email">' + escapeHtml(rcp.email) + '</span>' +
                             buildIntentSelect(rowId) +
                             buildModeSelect(rowId) +
