@@ -345,6 +345,132 @@
             color: #c62828;
         }
 
+        /* ---- Reply mailboxes admin list ---- */
+        .reply-mailbox-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 10px;
+            background: #f7f9fc;
+            border-radius: 8px;
+            border: 1px solid #e2e6ee;
+            margin-bottom: 6px;
+            font-size: 13px;
+        }
+        .reply-mailbox-row .rmb-meta { color: #444; }
+        .reply-mailbox-row .rmb-provider {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-right: 6px;
+        }
+        .rmb-provider.gmail { background: #ffe0b2; color: #b85f00; }
+        .rmb-provider.outlook { background: #cfd9ff; color: #1a3aa0; }
+        .reply-mailbox-row button {
+            background: #fff;
+            border: 1px solid #c8c8c8;
+            border-radius: 6px;
+            padding: 4px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            color: #555;
+        }
+        .reply-mailbox-row button:hover { background: #fff5f5; color: #c62828; border-color: #c62828; }
+
+        /* ---- Per-recipient reply controls under each sent email ---- */
+        .recipients-block {
+            margin-top: 10px;
+            padding: 10px 12px;
+            background: #fafbff;
+            border: 1px solid #e6e8f0;
+            border-radius: 8px;
+        }
+        .recipient-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            border-bottom: 1px dashed #ececec;
+            font-size: 13px;
+            flex-wrap: wrap;
+        }
+        .recipient-row:last-child { border-bottom: none; }
+        .recipient-role {
+            display: inline-block;
+            padding: 1px 7px;
+            border-radius: 8px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .role-to { background: #d8e7ff; color: #1a3aa0; }
+        .role-cc { background: #d9f1d9; color: #2a6f2a; }
+        .role-bcc { background: #f1e0ff; color: #6a1b9a; }
+        .recipient-row .rcp-email {
+            flex: 1;
+            min-width: 160px;
+            color: #333;
+            font-family: -apple-system, "Segoe UI", monospace;
+        }
+        .recipient-row select,
+        .recipient-row .btn-reply {
+            font-size: 12px;
+            padding: 5px 10px;
+            border-radius: 6px;
+            border: 1px solid #c8c8c8;
+            background: #fff;
+            cursor: pointer;
+        }
+        .recipient-row .btn-reply {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border: none;
+            font-weight: 600;
+        }
+        .recipient-row .btn-reply:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            background: #b9bedf;
+        }
+        .recipient-row .btn-reply.btn-secondary {
+            background: #fff;
+            color: #333;
+            border: 1px solid #ccc;
+        }
+        .reply-status {
+            font-size: 12px;
+            margin-left: 6px;
+            color: #2e7d32;
+            font-weight: 600;
+        }
+        .reply-status.failed { color: #c62828; }
+        .reply-status.pending { color: #ff8f00; }
+        .reply-detail {
+            margin-top: 6px;
+            padding: 8px 10px;
+            background: #fff;
+            border: 1px solid #e6e8f0;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #444;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+        .reply-detail header {
+            font-weight: 700;
+            color: #1a3aa0;
+            margin-bottom: 4px;
+        }
+        .reply-chain {
+            margin-left: 18px;
+            border-left: 2px solid #d6dbef;
+            padding-left: 12px;
+            margin-top: 6px;
+        }
+
         .error-message {
             background: #ffebee;
             color: #c62828;
@@ -556,6 +682,22 @@
                     </div>
                 </div>
 
+                <!-- Reply Mailboxes (test contacts) -->
+                <div class="form-section" id="replyMailboxSection">
+                    <h2>📥 Reply mailboxes (test contacts)</h2>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 12px;">
+                        Connect the Gmail / Outlook accounts you'll use as test "contacts". After sending an email, the <strong>Get reply</strong> button on each recipient row will fire a real AI-generated reply from that contact's mailbox back to the sender — so workspace sync sees a genuine inbound message.
+                    </p>
+                    <div id="replyMailboxList" style="margin-bottom: 12px; font-size: 14px;">
+                        <em style="color: #888;">Loading connected mailboxes…</em>
+                    </div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <a href="/api/auth/reply_mailbox/google" class="btn" id="linkConnectReplyGmail" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 18px;">+ Connect contact Gmail</a>
+                        <a href="/api/auth/reply_mailbox/outlook" class="btn" id="linkConnectReplyOutlook" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 18px;">+ Connect contact Outlook</a>
+                    </div>
+                    <small id="replyMailboxHint" style="color: #888; display: block; margin-top: 10px;"></small>
+                </div>
+
                 <!-- Optional Salesforce context (left column) -->
                 <div class="form-section">
                     <h2>📋 Salesforce context (optional)</h2>
@@ -699,6 +841,328 @@
 
     <script>
         let _lastAuthStatus = {};
+        let _replyMailboxes = [];
+
+        const REPLY_INTENTS = [
+            { value: 'asking',     label: 'Asking for details' },
+            { value: 'interested', label: 'Interested' },
+            { value: 'decline',    label: 'Polite decline' },
+            { value: 'forwarding', label: 'Forwarding internally' },
+            { value: 'ooo',        label: 'Out of office' },
+            { value: 'negotiation',label: 'Negotiation' },
+            { value: 'quick_yes',  label: 'Quick yes' },
+            { value: 'question',   label: 'Question on a fact' }
+        ];
+
+        function escapeHtml(s) {
+            return String(s || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        async function refreshReplyMailboxesList() {
+            const listEl = document.getElementById('replyMailboxList');
+            const hintEl = document.getElementById('replyMailboxHint');
+            if (!listEl) return;
+            try {
+                const r = await fetch('/api/reply_mailboxes');
+                const j = await r.json();
+                if (!j.success) {
+                    _replyMailboxes = [];
+                    listEl.innerHTML = '<em style="color:#c62828;">' + escapeHtml(j.error || 'Could not load mailboxes') + '</em>';
+                    if (hintEl) hintEl.textContent = j.error && /database/i.test(j.error) ? 'Set DATABASE_URL in .env to enable reply testing.' : '';
+                    return;
+                }
+                _replyMailboxes = j.mailboxes || [];
+                if (!_replyMailboxes.length) {
+                    listEl.innerHTML = '<em style="color:#888;">No contact mailboxes connected yet. Add one below.</em>';
+                } else {
+                    listEl.innerHTML = _replyMailboxes.map(m => {
+                        const prov = (m.provider || '').toLowerCase();
+                        return '<div class="reply-mailbox-row">' +
+                            '<span><span class="rmb-provider ' + escapeHtml(prov) + '">' + escapeHtml(prov || '?') + '</span>' +
+                            '<strong>' + escapeHtml(m.email) + '</strong>' +
+                            (m.display_name ? ' <span class="rmb-meta">— ' + escapeHtml(m.display_name) + '</span>' : '') +
+                            '</span>' +
+                            '<button type="button" data-email="' + escapeHtml(m.email) + '" class="rmb-delete">Forget</button>' +
+                            '</div>';
+                    }).join('');
+                    listEl.querySelectorAll('.rmb-delete').forEach(b => {
+                        b.addEventListener('click', async function () {
+                            if (!confirm('Forget reply mailbox ' + this.dataset.email + '? You can reconnect any time.')) return;
+                            await fetch('/api/reply_mailboxes/' + encodeURIComponent(this.dataset.email), { method: 'DELETE' });
+                            refreshReplyMailboxesList();
+                        });
+                    });
+                }
+                if (hintEl) hintEl.textContent = '';
+                document.querySelectorAll('.btn-reply[data-email]').forEach(b => {
+                    const isConnected = !!getReplyMailbox(b.dataset.email);
+                    if (b.dataset.replyState === 'sent') return;
+                    b.disabled = !isConnected;
+                    b.title = isConnected ? '' : 'Connect ' + b.dataset.email + ' as a reply mailbox first.';
+                });
+            } catch (err) {
+                listEl.innerHTML = '<em style="color:#c62828;">Failed to load: ' + escapeHtml(err.message) + '</em>';
+            }
+        }
+
+        function getReplyMailbox(email) {
+            const e = (email || '').toLowerCase();
+            return _replyMailboxes.find(m => (m.email || '').toLowerCase() === e);
+        }
+
+        function buildIntentSelect(idPrefix) {
+            const opts = REPLY_INTENTS.map(it =>
+                '<option value="' + it.value + '">' + escapeHtml(it.label) + '</option>'
+            ).join('');
+            return '<select class="intent-select" id="' + idPrefix + '-intent">' + opts + '</select>';
+        }
+
+        function buildModeSelect(idPrefix) {
+            return '<select class="mode-select" id="' + idPrefix + '-mode">' +
+                '<option value="reply">Reply</option>' +
+                '<option value="reply_all">Reply All</option>' +
+                '</select>';
+        }
+
+        function getTypeClass(type) {
+            const typeMap = {
+                'Opportunity': 'type-opportunity',
+                'Case': 'type-case',
+                'Meeting Invitation': 'type-meeting',
+                'Follow-up': 'type-followup',
+                'Thank You': 'type-thankyou',
+                'Project Update': 'type-project',
+                'Reminder': 'type-reminder',
+                'Product Trial Feedback': 'type-followup',
+                'Product Queries': 'type-meeting',
+                'Product Issues': 'type-reminder',
+                'Demo Enquiry': 'type-project'
+            };
+            return typeMap[type] || 'type-opportunity';
+        }
+
+        function renderEmailResult(email, idx) {
+            const wrap = document.createElement('div');
+            wrap.className = 'email-item';
+            wrap.style.flexDirection = 'column';
+            wrap.style.alignItems = 'stretch';
+
+            const typeClass = getTypeClass(email.type);
+            const errBlock = email.error
+                ? '<div class="email-error" style="margin-top:6px;color:#b00020;font-size:12px;white-space:pre-wrap;word-break:break-word;">' + escapeHtml(email.error) + '</div>'
+                : '';
+
+            const header = document.createElement('div');
+            header.style.display = 'flex';
+            header.style.justifyContent = 'space-between';
+            header.style.alignItems = 'center';
+            header.innerHTML =
+                '<div class="email-info">' +
+                    '<span class="email-type ' + typeClass + '">' + escapeHtml(email.type) + '</span>' +
+                    '<strong>' + escapeHtml(email.name) + '</strong>' +
+                    errBlock +
+                '</div>' +
+                '<span class="email-status status-' + email.status.toLowerCase() + '">' + escapeHtml(email.status) + '</span>';
+            wrap.appendChild(header);
+
+            if (email.status === 'Sent' && email.send_id && email.sender_provider !== 'smtp') {
+                const block = document.createElement('div');
+                block.className = 'recipients-block';
+                block.dataset.sendId = email.send_id;
+
+                const all = [];
+                (email.to || []).forEach(e => all.push({ email: e, role: 'to' }));
+                (email.cc || []).forEach(e => all.push({ email: e, role: 'cc' }));
+                (email.bcc || []).forEach(e => all.push({ email: e, role: 'bcc' }));
+
+                if (!all.length) {
+                    block.innerHTML = '<em style="color:#888;font-size:12px;">No recipients recorded.</em>';
+                } else {
+                    block.innerHTML = '<div style="font-size:12px;font-weight:600;color:#444;margin-bottom:6px;">Generate a reply from any recipient mailbox:</div>';
+                    all.forEach((rcp, i) => {
+                        const rowId = 'rcp-' + idx + '-' + i;
+                        const role = rcp.role || 'to';
+                        const row = document.createElement('div');
+                        row.className = 'recipient-row';
+                        row.dataset.email = rcp.email;
+                        row.innerHTML =
+                            '<span class="recipient-role role-' + role + '">' + role.toUpperCase() + '</span>' +
+                            '<span class="rcp-email">' + escapeHtml(rcp.email) + '</span>' +
+                            buildIntentSelect(rowId) +
+                            buildModeSelect(rowId) +
+                            '<button type="button" class="btn-reply" data-email="' + escapeHtml(rcp.email) + '" data-send-id="' + escapeHtml(email.send_id) + '" data-row-id="' + rowId + '">Get reply</button>' +
+                            '<span class="reply-status" id="' + rowId + '-status" style="display:none;"></span>' +
+                            '<div class="reply-chain" id="' + rowId + '-chain" style="width:100%;display:none;"></div>';
+                        block.appendChild(row);
+                    });
+                }
+                wrap.appendChild(block);
+                setTimeout(() => attachReplyButtonHandlers(block), 0);
+            }
+            return wrap;
+        }
+
+        function attachReplyButtonHandlers(scopeEl) {
+            scopeEl.querySelectorAll('button.btn-reply').forEach(b => {
+                if (b.dataset.bound === '1') return;
+                b.dataset.bound = '1';
+                const replierEmail = b.dataset.email;
+                const mb = getReplyMailbox(replierEmail);
+                if (!mb) {
+                    b.disabled = true;
+                    b.title = 'Connect ' + replierEmail + ' as a reply mailbox first.';
+                }
+                b.addEventListener('click', () => handleGetReply(b));
+            });
+        }
+
+        async function handleGetReply(btn) {
+            const sendId = btn.dataset.sendId;
+            const replierEmail = btn.dataset.email;
+            const rowId = btn.dataset.rowId;
+            const intent = (document.getElementById(rowId + '-intent') || {}).value || 'asking';
+            const mode = (document.getElementById(rowId + '-mode') || {}).value || 'reply';
+            const parentReplyId = btn.dataset.parentReplyId || '';
+            const statusEl = document.getElementById(rowId + '-status');
+            const chainEl = document.getElementById(rowId + '-chain');
+
+            btn.disabled = true;
+            if (statusEl) {
+                statusEl.style.display = 'inline';
+                statusEl.className = 'reply-status pending';
+                statusEl.textContent = '⏳ Generating reply…';
+            }
+
+            try {
+                const r = await fetch('/api/get_reply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        send_id: sendId,
+                        replier_email: replierEmail,
+                        mode: mode,
+                        intent: intent,
+                        parent_reply_id: parentReplyId || undefined
+                    })
+                });
+                const j = await r.json();
+                if (!j.success) {
+                    if (statusEl) {
+                        statusEl.className = 'reply-status failed';
+                        statusEl.textContent = '❌ ' + (j.error || 'Failed');
+                    }
+                    btn.disabled = false;
+                    return;
+                }
+                const reply = j.reply || {};
+                if (statusEl) {
+                    statusEl.className = 'reply-status';
+                    const when = new Date().toLocaleTimeString();
+                    statusEl.textContent = '✅ Reply sent · ' + when + ' · ' + (reply.intent || intent) +
+                        (reply.source === 'fallback' ? ' (canned)' : '');
+                }
+                btn.dataset.replyState = 'sent';
+                btn.textContent = '↻ Reply again';
+                btn.disabled = false;
+
+                if (chainEl) {
+                    chainEl.style.display = 'block';
+                    const detailId = rowId + '-detail-' + (reply.reply_id || Math.random().toString(36).slice(2, 8));
+                    const detail = document.createElement('div');
+                    detail.className = 'reply-detail';
+                    detail.id = detailId;
+                    detail.innerHTML =
+                        '<header>From ' + escapeHtml(reply.replier_email) + ' · ' + escapeHtml(reply.mode) + '</header>' +
+                        '<div>' + escapeHtml(reply.body) + '</div>' +
+                        '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;">' +
+                            '<button type="button" class="btn-reply btn-secondary" data-action="view-raw">View raw</button>' +
+                            '<button type="button" class="btn-reply btn-secondary" data-action="reply-chain" data-reply-id="' + escapeHtml(reply.reply_id) + '">Reply to this reply</button>' +
+                        '</div>' +
+                        '<div class="reply-raw" style="display:none;margin-top:6px;font-family:monospace;font-size:11px;background:#f3f4f8;border-radius:4px;padding:6px;">' +
+                            'Subject: ' + escapeHtml(reply.subject) + '\nMessage-ID: ' + escapeHtml(reply.message_id || '(none)') +
+                            '\nTo: ' + escapeHtml((reply.to || []).join(', ')) +
+                            (reply.cc && reply.cc.length ? '\nCc: ' + escapeHtml(reply.cc.join(', ')) : '') +
+                        '</div>' +
+                        '<div class="reply-chain-children" style="margin-top:8px;"></div>';
+                    chainEl.appendChild(detail);
+
+                    detail.querySelectorAll('button[data-action="view-raw"]').forEach(rb => {
+                        rb.addEventListener('click', () => {
+                            const raw = detail.querySelector('.reply-raw');
+                            if (raw) raw.style.display = raw.style.display === 'none' ? 'block' : 'none';
+                        });
+                    });
+                    detail.querySelectorAll('button[data-action="reply-chain"]').forEach(rb => {
+                        rb.addEventListener('click', () => openReplyChainPicker(rb, detail, reply, sendId, rowId));
+                    });
+                }
+            } catch (err) {
+                if (statusEl) {
+                    statusEl.className = 'reply-status failed';
+                    statusEl.textContent = '❌ ' + err.message;
+                }
+                btn.disabled = false;
+            }
+        }
+
+        function openReplyChainPicker(triggerBtn, detailEl, parentReply, sendId, parentRowId) {
+            const childWrap = detailEl.querySelector('.reply-chain-children');
+            if (!childWrap) return;
+            if (childWrap.dataset.picking === '1') {
+                childWrap.dataset.picking = '0';
+                childWrap.innerHTML = '';
+                return;
+            }
+            childWrap.dataset.picking = '1';
+
+            const eligible = (_replyMailboxes || []).filter(m =>
+                (m.email || '').toLowerCase() !== (parentReply.replier_email || '').toLowerCase()
+            );
+            const senderOpt = '<option value="__sender__">(original sender)</option>';
+            const replierOpts = eligible.map(m =>
+                '<option value="' + escapeHtml(m.email) + '">' + escapeHtml(m.email) + '</option>'
+            ).join('');
+
+            const pickerId = parentRowId + '-chain-' + (parentReply.reply_id || 'x');
+            const wrap = document.createElement('div');
+            wrap.className = 'recipient-row';
+            wrap.style.background = '#fff';
+            wrap.style.border = '1px dashed #ccd';
+            wrap.style.padding = '6px 8px';
+            wrap.style.borderRadius = '6px';
+            wrap.innerHTML =
+                '<span style="font-size:12px;color:#555;">Who replies next?</span>' +
+                '<select id="' + pickerId + '-who">' + senderOpt + replierOpts + '</select>' +
+                buildIntentSelect(pickerId) +
+                buildModeSelect(pickerId) +
+                '<button type="button" class="btn-reply" id="' + pickerId + '-go">Send chained reply</button>' +
+                '<span class="reply-status" id="' + pickerId + '-status" style="display:none;"></span>' +
+                '<div class="reply-chain" id="' + pickerId + '-chain" style="width:100%;display:none;"></div>';
+            childWrap.appendChild(wrap);
+
+            const goBtn = wrap.querySelector('#' + pickerId + '-go');
+            goBtn.addEventListener('click', async () => {
+                const who = (wrap.querySelector('#' + pickerId + '-who') || {}).value || '__sender__';
+                let replier = who;
+                if (who === '__sender__') {
+                    replier = parentReply.to && parentReply.to[0];
+                }
+                if (!replier) {
+                    alert('Could not determine the chained replier.');
+                    return;
+                }
+                goBtn.dataset.sendId = sendId;
+                goBtn.dataset.email = replier;
+                goBtn.dataset.rowId = pickerId;
+                goBtn.dataset.parentReplyId = parentReply.reply_id;
+                await handleGetReply(goBtn);
+            });
+        }
+
         function getSendMethod() {
             if (document.getElementById('segGmail').classList.contains('active')) return 'gmail';
             if (document.getElementById('segOutlook').classList.contains('active')) return 'outlook';
@@ -940,16 +1404,34 @@
         })();
         document.addEventListener('DOMContentLoaded', function() {
             authStatusRefresh();
-            if (new URLSearchParams(window.location.search).get('gmail') === 'connected' || new URLSearchParams(window.location.search).get('gmail') === 'ok') {
+            refreshReplyMailboxesList();
+            const qs = new URLSearchParams(window.location.search);
+            if (qs.get('gmail') === 'connected' || qs.get('gmail') === 'ok') {
                 setTimeout(function() { authStatusRefresh(); history.replaceState({}, document.title, '/'); }, 0);
             }
-            if (new URLSearchParams(window.location.search).get('outlook') === 'connected' || new URLSearchParams(window.location.search).get('outlook') === 'ok') {
+            if (qs.get('outlook') === 'connected' || qs.get('outlook') === 'ok') {
                 setTimeout(function() { authStatusRefresh(); history.replaceState({}, document.title, '/'); }, 0);
             }
-            if (new URLSearchParams(window.location.search).get('sf') === 'connected') {
+            if (qs.get('sf') === 'connected') {
                 setTimeout(function() { authStatusRefresh(); history.replaceState({}, document.title, '/'); }, 0);
             }
-            const sfErr = new URLSearchParams(window.location.search).get('sf_error');
+            if (qs.get('reply_mailbox') === 'connected') {
+                const sm = document.getElementById('successMessage');
+                if (sm) {
+                    sm.textContent = '✓ Reply mailbox connected: ' + (qs.get('email') || '');
+                    sm.classList.add('show');
+                    setTimeout(function() { sm.classList.remove('show'); }, 5000);
+                }
+                setTimeout(function() { refreshReplyMailboxesList(); history.replaceState({}, document.title, '/'); }, 0);
+            }
+            const rmErr = qs.get('reply_mailbox_error');
+            if (rmErr) {
+                const em = document.getElementById('errorMessage');
+                em.textContent = 'Reply mailbox connection failed (' + rmErr + '). Try again or check server logs.';
+                em.classList.add('show');
+                history.replaceState({}, document.title, '/');
+            }
+            const sfErr = qs.get('sf_error');
             if (sfErr) {
                 const em = document.getElementById('errorMessage');
                 em.textContent = 'Salesforce connection failed (' + sfErr + '). Try again or check server logs.';
@@ -1086,48 +1568,10 @@
                     const emailList = document.getElementById('emailList');
                     emailList.innerHTML = '';
 
-                    result.emails.forEach(email => {
-                        const item = document.createElement('div');
-                        item.className = 'email-item';
-
-                        // Map email type to CSS class
-                        const typeClass = getTypeClass(email.type);
-
-                        const errEsc = (email.error || '')
-                            .replace(/&/g, '&amp;')
-                            .replace(/</g, '&lt;')
-                            .replace(/>/g, '&gt;');
-                        const errBlock = errEsc
-                            ? `<div class="email-error" style="margin-top:6px;color:#b00020;font-size:12px;white-space:pre-wrap;word-break:break-word;">${errEsc}</div>`
-                            : '';
-
-                        item.innerHTML = `
-                            <div class="email-info">
-                                <span class="email-type ${typeClass}">${email.type}</span>
-                                <strong>${email.name}</strong>
-                                ${errBlock}
-                            </div>
-                            <span class="email-status status-${email.status.toLowerCase()}">${email.status}</span>
-                        `;
-                        emailList.appendChild(item);
+                    result.emails.forEach((email, idx) => {
+                        emailList.appendChild(renderEmailResult(email, idx));
                     });
-
-                    function getTypeClass(type) {
-                        const typeMap = {
-                            'Opportunity': 'type-opportunity',
-                            'Case': 'type-case',
-                            'Meeting Invitation': 'type-meeting',
-                            'Follow-up': 'type-followup',
-                            'Thank You': 'type-thankyou',
-                            'Project Update': 'type-project',
-                            'Reminder': 'type-reminder',
-                            'Product Trial Feedback': 'type-followup',
-                            'Product Queries': 'type-meeting',
-                            'Product Issues': 'type-reminder',
-                            'Demo Enquiry': 'type-project'
-                        };
-                        return typeMap[type] || 'type-opportunity';
-                    }
+                    refreshReplyMailboxesList();
 
                     document.getElementById('results').classList.add('show');
 

@@ -36,6 +36,10 @@ _DEFAULT_PROMPT_PATH = (
     Path(__file__).resolve().parents[2] / "prompts" / "email_system_prompt.md"
 )
 
+_DEFAULT_REPLY_PROMPT_PATH = (
+    Path(__file__).resolve().parents[2] / "prompts" / "email_reply_system_prompt.md"
+)
+
 
 def _custom_system_prompt_path() -> Path:
     """Path to the editable system-prompt file. Override with $EMAIL_SYSTEM_PROMPT_PATH."""
@@ -43,6 +47,14 @@ def _custom_system_prompt_path() -> Path:
     if env_path:
         return Path(env_path).expanduser().resolve()
     return _DEFAULT_PROMPT_PATH
+
+
+def _custom_reply_prompt_path() -> Path:
+    """Path to the editable reply system-prompt file. Override with $EMAIL_REPLY_SYSTEM_PROMPT_PATH."""
+    env_path = (os.getenv("EMAIL_REPLY_SYSTEM_PROMPT_PATH") or "").strip()
+    if env_path:
+        return Path(env_path).expanduser().resolve()
+    return _DEFAULT_REPLY_PROMPT_PATH
 
 
 def _load_custom_system_prompt() -> str:
@@ -603,3 +615,246 @@ def compose_email(
         "plain_text": plain,
         "html_content": html_body,
     }
+
+
+# ---------------------------------------------------------------------------
+# Reply composition (used by /api/get_reply)
+# ---------------------------------------------------------------------------
+
+
+REPLY_INTENTS = {
+    "interested": "Interested",
+    "asking": "Asking for details",
+    "decline": "Polite decline",
+    "forwarding": "Forwarding internally",
+    "ooo": "Out of office",
+    "negotiation": "Negotiation",
+    "quick_yes": "Quick yes",
+    "question": "Question on a fact",
+}
+
+_REPLY_FALLBACK_BODIES = {
+    "interested": (
+        "Thanks {name_clause}— this lines up with where we're heading next quarter. "
+        "Could you grab 15 minutes next week to walk me through the specifics on {subject_snip}?"
+    ),
+    "asking": (
+        "Appreciate the note. Before we go further, could you send pricing tiers, "
+        "any security/IT documentation, and one customer reference in our space?"
+    ),
+    "decline": (
+        "Thanks for the message. We're set with our current vendor for now and "
+        "aren't actively evaluating alternatives. I'd rather not take a meeting "
+        "today, but happy to reconnect if that changes."
+    ),
+    "forwarding": (
+        "Looping in our procurement lead on this — they own anything tied to "
+        "{subject_snip}. They'll reach out if it makes sense to move forward."
+    ),
+    "ooo": (
+        "I'm out of office until next Monday with limited access to email. "
+        "I'll get back to you when I'm back at my desk."
+    ),
+    "negotiation": (
+        "The direction looks right, but the timing on {subject_snip} doesn't work "
+        "for us — we're locked in on Q1 commitments already. If you can shift to a "
+        "Q2 start, let's talk."
+    ),
+    "quick_yes": (
+        "Sounds good — go ahead."
+    ),
+    "question": (
+        "Quick clarification on {subject_snip}: what does that actually include? "
+        "We've been burned before on scope assumptions, so worth being specific up front."
+    ),
+}
+
+
+def _load_reply_system_prompt() -> str:
+    path = _custom_reply_prompt_path()
+    try:
+        if not path.is_file():
+            return ""
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        logger.warning("Could not read reply system prompt at %s: %s", path, e)
+        return ""
+    marker = "Replace everything below this line with your own reply system prompt."
+    if marker in text:
+        text = text.split(marker, 1)[1]
+        text = text.lstrip("\n -")
+    text = text.strip()
+    if not text:
+        return ""
+    if len(text) > _MAX_CUSTOM_PROMPT_LEN:
+        text = text[: _MAX_CUSTOM_PROMPT_LEN - 1].rstrip() + "…"
+    return text
+
+
+def _reply_fallback_body(
+    intent: str,
+    *,
+    replier_name: str,
+    original_subject: str,
+) -> str:
+    """Canned reply used when OpenAI is unavailable or fails.
+
+    Mirrors the same intent labels the LLM uses so the rest of the
+    pipeline stays consistent regardless of whether AI fired or not.
+    """
+    template = _REPLY_FALLBACK_BODIES.get(intent) or _REPLY_FALLBACK_BODIES["asking"]
+    name_clause = (
+        f"for the note on {original_subject.strip()}, " if original_subject.strip() else ""
+    )
+    snippet = (original_subject or "this").strip() or "this"
+    body = template.format(name_clause=name_clause, subject_snip=snippet[:80])
+    if replier_name:
+        body = f"{body}\n\n— {replier_name.split()[0]}"
+    return body
+
+
+def compose_reply(
+    *,
+    original_subject: str,
+    original_body_plain: str,
+    original_sender_name: str = "",
+    original_sender_email: str = "",
+    replier_name: str = "",
+    replier_email: str = "",
+    replier_title: str = "",
+    replier_account: str = "",
+    intent: str = "asking",
+    mode: str = "reply",
+    tone_hint: str = "",
+    extra_context: str = "",
+) -> Dict[str, Any]:
+    """Generate a reply body from the perspective of a test contact mailbox.
+
+    Returns ``{"body": str, "intent": str, "source": "ai"|"fallback"}``.
+
+    The caller is responsible for prefixing ``Re: `` to the original
+    subject and for assembling the MIME with ``In-Reply-To`` / ``References``
+    — this helper only produces the *content* of the reply.
+    """
+    intent_key = (intent or "asking").lower().strip()
+    if intent_key not in REPLY_INTENTS:
+        intent_key = "asking"
+    intent_label = REPLY_INTENTS[intent_key]
+
+    rname = (replier_name or "").strip() or _name_from_email(replier_email)
+    sname = (original_sender_name or "").strip() or _name_from_email(original_sender_email)
+
+    client = _get_client()
+    if client is None:
+        return {
+            "body": _reply_fallback_body(
+                intent_key, replier_name=rname, original_subject=original_subject
+            ),
+            "intent": intent_label,
+            "source": "fallback",
+        }
+
+    custom = _load_reply_system_prompt()
+    base_system = (
+        "You are roleplaying as a real B2B contact who just received a sales/"
+        "account email. Reply AS that contact — never as the salesperson. "
+        "Output STRICT JSON with shape: {\"body\": \"string\"}. No commentary, "
+        "no markdown, no code fences. Keep it short; reference at least one "
+        "specific fact from the original; sign off with the contact's first "
+        "name only; never use the banned 'I hope this finds you well' style "
+        "openers."
+    )
+    if custom:
+        system = (
+            base_system
+            + "\n\n----- TEAM REPLY SYSTEM PROMPT -----\n"
+            + custom
+            + "\n----- END TEAM REPLY SYSTEM PROMPT -----\n"
+        )
+    else:
+        system = base_system
+
+    persona_lines = []
+    if rname:
+        persona_lines.append(f"Name: {rname}")
+    if replier_email:
+        persona_lines.append(f"Email: {replier_email}")
+    if replier_title:
+        persona_lines.append(f"Title: {replier_title}")
+    if replier_account:
+        persona_lines.append(f"Company: {replier_account}")
+    persona = "\n".join(persona_lines) if persona_lines else "(persona details unknown — keep neutral)"
+
+    truncated_body = (original_body_plain or "").strip()[:6000]
+
+    user_sections = [
+        f"Intent: {intent_label}",
+        f"Mode: {mode}",
+    ]
+    if tone_hint and tone_hint.strip():
+        user_sections.append(f"Tone hint: {tone_hint.strip()}")
+    user_sections.extend([
+        "REPLIER PERSONA (you are this person):",
+        persona,
+        "ORIGINAL EMAIL YOU RECEIVED:",
+        f"From: {sname or original_sender_email or 'sender'} <{original_sender_email or 'sender@example.com'}>",
+        f"Subject: {original_subject or '(no subject)'}",
+        "",
+        truncated_body or "(empty body)",
+    ])
+    if extra_context and extra_context.strip():
+        user_sections.append("ADDITIONAL CONTEXT:")
+        user_sections.append(extra_context.strip()[:2000])
+    user_sections.append(
+        'Return JSON only: {"body": "<your reply body as the persona, no Subject line>"}'
+    )
+    user = "\n\n".join(user_sections)
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+
+    raw: str = ""
+    last_err: Optional[Exception] = None
+    for attempt in range(2):
+        try:
+            resp = client.chat.completions.create(
+                model=_model(),
+                messages=messages,
+                temperature=_temperature(jitter=True),
+                response_format={"type": "json_object"},
+            )
+            raw = (resp.choices[0].message.content or "").strip()
+            if raw:
+                break
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            logger.warning(
+                "OpenAI reply call failed (attempt %d/%d): %s", attempt + 1, 2, e
+            )
+
+    if not raw:
+        if last_err is not None:
+            logger.error("AI reply generation failed: %s", last_err)
+        return {
+            "body": _reply_fallback_body(
+                intent_key, replier_name=rname, original_subject=original_subject
+            ),
+            "intent": intent_label,
+            "source": "fallback",
+        }
+
+    parsed = _safe_parse(raw)
+    body = ""
+    if isinstance(parsed, dict):
+        body = (parsed.get("body") or parsed.get("text") or "").strip()
+    if not body:
+        body = _reply_fallback_body(
+            intent_key, replier_name=rname, original_subject=original_subject
+        )
+        return {"body": body, "intent": intent_label, "source": "fallback"}
+
+    if len(body) > 4000:
+        body = body[:4000].rstrip() + "…"
+    return {"body": body, "intent": intent_label, "source": "ai"}

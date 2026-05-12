@@ -11,3 +11,4 @@ msal==1.26.0
 Pillow==12.2.0
 pytesseract==0.3.10
 openai==2.36.0
+psycopg[binary]==3.3.4

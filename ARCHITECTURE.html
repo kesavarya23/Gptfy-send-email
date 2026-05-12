@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Salesforce Email Sender — Architecture</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #57606a;
+    --accent: #0969da;
+    --border: #d0d7de;
+    --code-bg: #f6f8fa;
+    --table-header: #f6f8fa;
+    --callout-info-bg: #ddf4ff;
+    --callout-info-border: #54aeff;
+    --callout-warn-bg: #fff8c5;
+    --callout-warn-border: #d4a72c;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  main {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 48px 32px 64px 32px;
+  }
+  h1 { font-size: 32px; margin: 0 0 8px 0; letter-spacing: -0.02em; }
+  h2 {
+    font-size: 22px;
+    margin: 40px 0 12px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    letter-spacing: -0.01em;
+  }
+  h3 { font-size: 17px; margin: 24px 0 8px 0; }
+  p { margin: 8px 0; }
+  ul, ol { margin: 8px 0; padding-left: 24px; }
+  li { margin: 4px 0; }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    overflow: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  pre code { background: none; border: none; padding: 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: var(--table-header); font-weight: 600; }
+  tr:nth-child(even) td { background: #fbfcfd; }
+  blockquote {
+    margin: 12px 0;
+    padding: 10px 16px;
+    background: var(--callout-info-bg);
+    border-left: 4px solid var(--callout-info-border);
+    border-radius: 4px;
+    color: var(--fg);
+  }
+  blockquote p { margin: 4px 0; }
+  hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 28px 0;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 16px;
+    margin: 0 0 20px 0;
+  }
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin: 24px 0;
+  }
+  .stat {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+  .stat .v { font-size: 24px; font-weight: 700; }
+  .stat .l { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .warn {
+    background: var(--callout-warn-bg);
+    border-left: 4px solid var(--callout-warn-border);
+    padding: 12px 16px;
+    margin: 12px 0;
+    border-radius: 4px;
+  }
+  @media print {
+    body { font-size: 12px; }
+    main { padding: 16px; max-width: none; }
+    h2 { page-break-after: avoid; }
+    table, pre, blockquote { page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Salesforce Email Sender — Architecture</h1>
+<p class="subtitle">A Flask web app that generates and sends personalised B2B emails from Gmail or Outlook, grounded in real Salesforce account and opportunity data, with subject + body composed by an OpenAI model.</p>
+<p><strong>Live URL:</strong> <a href="https://gptfy-send-email.vercel.app">https://gptfy-send-email.vercel.app</a></p>
+
+<div class="meta-grid">
+  <div class="stat"><div class="v">3</div><div class="l">OAuth Providers</div></div>
+  <div class="stat"><div class="v">11</div><div class="l">HTTP Routes</div></div>
+  <div class="stat"><div class="v">6</div><div class="l">Service Modules</div></div>
+  <div class="stat"><div class="v">Vercel</div><div class="l">Hosted On</div></div>
+</div>
+
+<hr>
+
+<h2>Tech stack</h2>
+
+<h3>Backend runtime</h3>
+<ul>
+  <li><code>Python 3</code> + <code>Flask 3</code> single-file app (<code>app.py</code>)</li>
+  <li><code>flask-cors</code> for browser API calls</li>
+  <li><code>requests</code> for all outbound HTTP (Google, Microsoft, Salesforce, OpenAI)</li>
+  <li><code>jinja2</code> for legacy email templates</li>
+</ul>
+
+<h3>Integrations</h3>
+<ul>
+  <li><code>google-api-python-client</code> + <code>google-auth</code> — Gmail send</li>
+  <li><code>msal</code> — Microsoft refresh-token rotation; Graph called via <code>requests</code></li>
+  <li><code>simple-salesforce</code> + raw OAuth — SOQL queries on Account / Opportunity / Contact</li>
+  <li><code>openai 2.x</code> — chat completions in JSON mode for email composition</li>
+  <li><code>pytesseract</code> + <code>Pillow</code> — local OCR with OpenAI vision fallback for screenshot uploads</li>
+</ul>
+
+<h3>Frontend &amp; infrastructure</h3>
+<ul>
+  <li>Single HTML page <code>templates/index.html</code>; vanilla JS — no React or build step</li>
+  <li><code>vercel.json</code> routes everything to <code>app.py</code> via <code>@vercel/python</code></li>
+  <li>Sessions are signed Flask cookies — no DB or Redis needed</li>
+  <li>Configuration via Vercel environment variables</li>
+</ul>
+
+<hr>
+
+<h2>System architecture</h2>
+<p>Three logical layers: a static-feeling browser UI, a Flask API that mediates every external call, and per-user OAuth tokens kept inside a signed cookie so the app stays stateless and serverless-friendly.</p>
+
+<h3>Component map</h3>
+<table>
+  <thead><tr><th>Layer</th><th>Component</th><th>Responsibility</th><th>Key files</th></tr></thead>
+  <tbody>
+    <tr><td>Browser</td><td><code>index.html</code> UI</td><td>Sender method picker, recipients, Salesforce context, topic mix, send button</td><td><code>templates/index.html</code></td></tr>
+    <tr><td>Browser</td><td><code>salesforce_setup.html</code></td><td>Per-user form for the Connected App's Consumer Key / Secret / Login URL</td><td><code>templates/salesforce_setup.html</code></td></tr>
+    <tr><td>Web API</td><td>Flask routes</td><td>OAuth start/callback for Google, Microsoft, Salesforce; <code>/send_emails</code> orchestrator; <code>/api/auth/status</code></td><td><code>app.py</code></td></tr>
+    <tr><td>Service</td><td><code>oauth_send</code></td><td>Send via Gmail API or Microsoft Graph using stored refresh tokens</td><td><code>src/services/oauth_send.py</code></td></tr>
+    <tr><td>Service</td><td><code>email_service</code></td><td>Legacy SMTP path (Gmail App Password / generic SMTP)</td><td><code>src/services/email_service.py</code></td></tr>
+    <tr><td>Service</td><td><code>ai_writer</code></td><td>Compose subject + paragraphs with OpenAI; render plain text + HTML</td><td><code>src/services/ai_writer.py</code></td></tr>
+    <tr><td>Service</td><td><code>sf_oauth</code></td><td>Salesforce OAuth flow, PKCE, refresh, identity enrichment</td><td><code>src/services/sf_oauth.py</code></td></tr>
+    <tr><td>Service</td><td><code>sf_live_account</code></td><td>SOQL on Account / open Opportunities / Contacts; flatten for the AI prompt</td><td><code>src/services/sf_live_account.py</code></td></tr>
+    <tr><td>Utils</td><td><code>context_extract</code></td><td>Read user-uploaded text/markdown; OCR images via Tesseract → OpenAI vision</td><td><code>src/utils/context_extract.py</code></td></tr>
+    <tr><td>External</td><td>Google / Microsoft / Salesforce / OpenAI</td><td>OAuth providers + send / SOQL / LLM APIs</td><td>—</td></tr>
+  </tbody>
+</table>
+
+<h3>Architecture diagram</h3>
+<pre><code>                        Browser (templates/index.html)
+                                  |
+                                  v
++-------------------------------------------------------------+
+|                       Flask app (app.py)                    |
+|                                                             |
+|   /api/auth/google ----> Google OAuth     -----> Gmail API  |
+|   /api/auth/outlook ---> Microsoft OAuth  -----> MS Graph   |
+|   /api/auth/salesforce > Salesforce OAuth -----> SOQL       |
+|                                                             |
+|   /send_emails  --> ai_writer ---> OpenAI Chat Completions  |
+|                  -> oauth_send/email_service ---> SMTP/API  |
++-------------------------------------------------------------+
+                                  |
+                signed Flask cookie holds:
+        - google_refresh_token / microsoft_refresh_token
+        - salesforce_refresh_token + instance_url
+        - per-user Connected App credentials</code></pre>
+
+<hr>
+
+<h2>Three OAuth flows, one cookie session</h2>
+<p>Each provider has its own start + callback route. Tokens are stored in the Flask session (a signed cookie) so multiple users on the same Vercel deployment never see each other's data, and there is no DB to manage.</p>
+
+<table>
+  <thead><tr><th>Provider</th><th>Start route</th><th>Callback route</th><th>Auth pattern</th><th>Stored in session</th></tr></thead>
+  <tbody>
+    <tr><td>Google (Gmail)</td><td><code>/api/auth/google</code></td><td><code>/api/auth/google/callback</code></td><td>OAuth2 code flow + offline access</td><td><code>google_refresh_token</code></td></tr>
+    <tr><td>Microsoft (Outlook)</td><td><code>/api/auth/outlook</code></td><td><code>/api/auth/outlook/callback</code></td><td>OAuth2 code flow + <code>offline_access</code></td><td><code>microsoft_refresh_token</code></td></tr>
+    <tr><td>Salesforce (per-user Connected App)</td><td><code>/api/auth/salesforce</code></td><td><code>/api/auth/salesforce/callback</code></td><td>OAuth2 code flow + PKCE</td><td><code>salesforce_refresh_token</code> + <code>instance_url</code></td></tr>
+  </tbody>
+</table>
+
+<blockquote><strong>Why this is interesting in the demo:</strong> every user authenticates with their own Google / Microsoft / Salesforce accounts — there is no shared mailbox or shared service account. The Salesforce Connected App is even configured per user via <code>/salesforce/setup</code>, so anyone in the org can plug in their own sandbox or production org without redeploying.</blockquote>
+
+<hr>
+
+<h2>End-to-end send flow</h2>
+<p>What actually happens between clicking <strong>Send Emails</strong> and the message arriving in the recipient's inbox.</p>
+
+<h3>Step 1 — UI submit</h3>
+<p>Browser POSTs <code>/send_emails</code> with sender method, recipients, CC/BCC, count, topic mix, optional Salesforce account / opportunity text, and any uploaded screenshot.</p>
+
+<h3>Step 2 — Build context</h3>
+<ul>
+  <li>If a Salesforce account is loaded, <code>resolve_account_bundle()</code> runs SOQL for <strong>Account</strong>, <strong>open Opportunities</strong>, and <strong>Contacts</strong></li>
+  <li>Uploaded images are OCR'd via Tesseract or OpenAI vision</li>
+  <li>Output: a flat text blob the LLM can consume</li>
+</ul>
+
+<h3>Step 3 — Compose</h3>
+<p>For each email, <code>ai_writer.compose_email()</code> calls the LLM in JSON mode with:</p>
+<ul>
+  <li>A <strong>system prompt</strong> with hard rules + the team's editable brand-voice file (<code>prompts/email_system_prompt.md</code>)</li>
+  <li>A <strong>user prompt</strong> that includes the Salesforce facts and a per-email <em>variation hint</em> so a batch of N emails has N distinct openers</li>
+</ul>
+<p>Output is normalised to <code>{ subject, paragraphs[] }</code> and rendered to plain text + minimal HTML.</p>
+
+<h3>Step 4 — Send</h3>
+<ul>
+  <li><strong>Gmail OAuth</strong> → <code>send_gmail()</code> refreshes the access token and POSTs to the Gmail API</li>
+  <li><strong>Outlook OAuth</strong> → <code>get_microsoft_access_token()</code> via MSAL, then POST to <code>graph.microsoft.com/v1.0/me/sendMail</code></li>
+  <li><strong>SMTP</strong> → <code>EmailService.send_email()</code> over <code>STARTTLS</code> with username + app password</li>
+</ul>
+
+<blockquote><strong>Salesforce-anchored batches:</strong> each email is bound to <em>one</em> open opportunity from the chosen account (cycled if the user asks for more emails than open opps). Closed-Won / Closed-Lost are intentionally excluded — outreach only goes against deals still in pipeline.</blockquote>
+
+<hr>
+
+<h2>HTTP routes</h2>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>GET</code></td><td><code>/</code></td><td>Single-page UI</td></tr>
+    <tr><td><code>POST</code></td><td><code>/send_emails</code></td><td>Generate + send the batch</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/auth/status</code></td><td>Which providers are connected; which are configured</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/auth/google</code></td><td>Start Gmail OAuth</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/auth/google/callback</code></td><td>Exchange code → refresh token</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/auth/outlook</code></td><td>Start Microsoft OAuth</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/auth/outlook/callback</code></td><td>Exchange code → refresh token</td></tr>
+    <tr><td><code>GET</code> / <code>POST</code></td><td><code>/salesforce/setup</code></td><td>In-app form for the Connected App credentials</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/auth/salesforce</code></td><td>Start Salesforce OAuth (PKCE)</td></tr>
+    <tr><td><code>GET</code></td><td><code>/api/auth/salesforce/callback</code></td><td>Exchange code + verifier → refresh token</td></tr>
+    <tr><td><code>POST</code></td><td><code>/api/salesforce/account</code></td><td>Resolve an Account name/Id → opportunities + contacts</td></tr>
+    <tr><td><code>POST</code> / <code>GET</code></td><td><code>/api/auth/disconnect</code></td><td>Drop tokens from the session</td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h2>How AI generation stays "demo-safe"</h2>
+
+<h3>Hard rules in the system prompt</h3>
+<ul>
+  <li>Use only the facts the prompt provides — never invent prices, dates, names, or partnerships</li>
+  <li>Output strict JSON: <code>{ subject, paragraphs[] }</code></li>
+  <li>Subject ≤ 80 chars, no clickbait, no ALL CAPS</li>
+  <li>Banned worn-out openers ("I hope this finds you well", "Just checking in", etc.)</li>
+  <li>Vary opening structure, subject pattern, and sign-off across a batch</li>
+</ul>
+
+<h3>Per-email variation</h3>
+<ul>
+  <li>A <code>variation_hint</code> argument is injected high in the user prompt for each email in a batch</li>
+  <li>Temperature gets a small jitter (<code>+0.2 ± 0.1</code>) so 5 emails land on 5 different points of the sampling curve</li>
+  <li>Output is parsed defensively: stripped code fences, salvage JSON between first <code>{</code> and last <code>}</code>, fall back to template-based generation on any failure</li>
+</ul>
+
+<h3>Graceful degradation</h3>
+<p>Every external call has a fallback:</p>
+<ul>
+  <li>No OpenAI key → Jinja templates</li>
+  <li>OCR unavailable → vision API</li>
+  <li>Salesforce not connected → random sample context</li>
+  <li>Provider OAuth not configured → SMTP path remains</li>
+</ul>
+
+<hr>
+
+<h2>Deployment + configuration</h2>
+
+<h3>Vercel deployment</h3>
+<ul>
+  <li><code>vercel.json</code> uses <code>@vercel/python</code> and routes <code>/(.*)</code> to <code>app.py</code></li>
+  <li>Each request is a fresh serverless invocation. State lives in the signed cookie — no DB or Redis required</li>
+  <li><code>FLASK_SECRET_KEY</code> must be a stable env var; otherwise cookies break between cold starts and OAuth state checks fail</li>
+</ul>
+
+<h3>Required Vercel environment variables</h3>
+<pre><code>FLASK_SECRET_KEY
+PUBLIC_BASE_URL
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+GOOGLE_OAUTH_REDIRECT
+MICROSOFT_CLIENT_ID
+MICROSOFT_CLIENT_SECRET
+MICROSOFT_TENANT
+MICROSOFT_OAUTH_REDIRECT
+OPENAI_API_KEY
+OPENAI_MODEL
+OPENAI_TEMPERATURE
+OPENAI_TIMEOUT</code></pre>
+
+<blockquote><strong>Note:</strong> Salesforce credentials are NOT env vars — each user enters them via the in-app <code>/salesforce/setup</code> page.</blockquote>
+
+<h3>Provider portals that also need configuration</h3>
+<table>
+  <thead><tr><th>Portal</th><th>Setting</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>Google Cloud Console</td><td>Authorized redirect URIs</td><td><code>https://gptfy-send-email.vercel.app/api/auth/google/callback</code></td></tr>
+    <tr><td>Azure Portal — Authentication</td><td>Web platform redirect URI</td><td><code>https://gptfy-send-email.vercel.app/api/auth/outlook/callback</code></td></tr>
+    <tr><td>Salesforce Connected App</td><td>Callback URL</td><td><code>https://gptfy-send-email.vercel.app/api/auth/salesforce/callback</code></td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h2>Suggested demo script (5–7 minutes)</h2>
+<table>
+  <thead><tr><th>#</th><th>Beat</th><th>What you click / say</th><th>What it proves</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>Open the app</td><td>Show the deployed URL; point to the three sender method pills</td><td>Stateless serverless deploy on Vercel</td></tr>
+    <tr><td>2</td><td>Connect Gmail</td><td>Click Connect Google → consent → land back with a green check</td><td>OAuth2 code flow + refresh token stored in cookie</td></tr>
+    <tr><td>3</td><td>Connect Outlook</td><td>Same flow with Microsoft</td><td>Multi-provider design; MSAL for token rotation</td></tr>
+    <tr><td>4</td><td>Connect Salesforce org</td><td>Open <code>/salesforce/setup</code>, paste Consumer Key + Secret of your Connected App</td><td>Per-user Connected App — anyone can plug in their own org</td></tr>
+    <tr><td>5</td><td>Load a real account</td><td>Tick <em>Use custom Account &amp; Opportunity</em>, enter an Account name, click <em>Load from org</em></td><td>Live SOQL: Account + open Opportunities + Contacts</td></tr>
+    <tr><td>6</td><td>Send a small batch</td><td>Set count = 3, pick a topic mix, hit Send Emails</td><td>Per-opportunity emails, AI-composed, anti-repetition variation hints</td></tr>
+    <tr><td>7</td><td>Show one inbox</td><td>Open Gmail and Outlook; show the sent message</td><td>Real send via Gmail API and Microsoft Graph</td></tr>
+    <tr><td>8</td><td>Show the prompt file</td><td>Open <code>prompts/email_system_prompt.md</code></td><td>Brand voice is editable without code changes</td></tr>
+  </tbody>
+</table>
+
+<hr>
+
+<h2>30-second verbal summary</h2>
+<blockquote>This is a stateless Flask app on Vercel. Users connect Gmail, Outlook, or their own Salesforce org via OAuth — all tokens live in a signed cookie, so there's no database. When you click Send, the app pulls real Account and open Opportunity data from Salesforce via SOQL, asks an OpenAI model to write each email anchored to one specific opportunity (with anti-repetition variation hints across the batch), and then sends through the Gmail API or Microsoft Graph. Every external call has a graceful fallback — no OpenAI key falls back to Jinja templates, no Salesforce falls back to random sample context, OCR falls back from Tesseract to OpenAI vision.</blockquote>
+
+<hr>
+
+<h2>Things to flag if asked</h2>
+
+<div class="warn">
+<strong>Security follow-ups:</strong>
+<ul>
+  <li>Rotate the secrets that have been in screenshots / chat history (Google, Microsoft, OpenAI, Flask)</li>
+  <li>Confirm <code>.env</code> stays gitignored</li>
+  <li>Consider replacing the cookie session with an encrypted server-side store if user volume grows past the 4 KB cookie limit</li>
+</ul>
+</div>
+
+<blockquote><strong>Possible next features:</strong>
+<ul>
+  <li>Send-later scheduling and per-recipient delay (UI already exposes a delay field)</li>
+  <li>Reply-thread tracking via Gmail <code>threadId</code> / Graph <code>conversationId</code></li>
+  <li>Per-org system-prompt overrides (the file path is already env-configurable)</li>
+  <li>Per-user audit log of sent emails (today only the in-page result tally exists)</li>
+</ul>
+</blockquote>
+
+<hr>
+
+<h2>File map (for engineers joining the project)</h2>
+<pre><code>gptfy-send-email/
+├── app.py                              # Flask app + all routes
+├── vercel.json                         # @vercel/python routing
+├── requirements.txt                    # Python deps
+├── runtime.txt / Procfile              # Heroku-style fallback
+├── .env / .env.example                 # Local-only secrets (gitignored)
+├── prompts/
+│   └── email_system_prompt.md          # Editable brand voice
+├── templates/
+│   ├── index.html                      # Single-page UI
+│   └── salesforce_setup.html           # Per-user Connected App form
+└── src/
+    ├── agent.py                        # SMTP wrapper
+    ├── services/
+    │   ├── ai_writer.py                # OpenAI email composer
+    │   ├── email_service.py            # SMTP send
+    │   ├── oauth_send.py               # Gmail API + Graph send
+    │   ├── sf_live_account.py          # SOQL Account + Opps + Contacts
+    │   └── sf_oauth.py                 # Salesforce OAuth + token refresh
+    ├── templates/                      # Legacy Jinja email templates
+    │   ├── meeting_invitation.html
+    │   ├── followup.html
+    │   ├── thank_you.html
+    │   ├── project_update.html
+    │   ├── reminder.html
+    │   ├── case_email.html
+    │   ├── opportunity_email.html
+    │   ├── professional_context_email.html
+    │   └── generic_business.html
+    └── utils/
+        ├── context_extract.py          # OCR + text extraction
+        ├── data_generator.py           # Sample context fallback
+        └── email_generator.py          # Jinja template renderer</code></pre>
+
+</main>
+</body>
+</html>

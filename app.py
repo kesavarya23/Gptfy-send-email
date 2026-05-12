@@ -31,12 +31,17 @@ from agent import EmailAgent
 from utils.data_generator import DataGenerator
 from utils.email_generator import EmailGenerator
 from services.oauth_send import (
+    find_gmail_thread_id_by_message_id,
+    find_outlook_message_by_internet_id,
+    generate_message_id,
     get_google_user_info,
     get_microsoft_access_token,
     get_microsoft_user_info,
+    reply_outlook,
     send_gmail,
     send_outlook,
 )
+from services import db as repdb
 from utils.context_extract import (
     build_salesforce_context,
     combined_opportunity_text,
@@ -53,7 +58,11 @@ from services.sf_oauth import (
     store_oauth_config as store_sf_oauth_config,
 )
 from services.sf_live_account import resolve_account_bundle
-from services.ai_writer import compose_email as ai_compose_email, is_ai_enabled
+from services.ai_writer import (
+    compose_email as ai_compose_email,
+    compose_reply as ai_compose_reply,
+    is_ai_enabled,
+)
 
 # Send INFO+ from our own modules to stderr so failures in OAuth / Graph / SMTP
 # show up in the terminal during development. Werkzeug configures its own
@@ -116,22 +125,33 @@ def _do_send_email(
     cc: list = None,
     bcc: list = None,
 ):
-    """Send a single email. Returns ``(success: bool, error: str)``.
+    """Send a single email.
 
-    ``error`` is empty on success; on failure it contains the most specific
-    message we have (Graph error body, SMTP exception text, etc.) so the
-    caller can show it in the UI.
+    Returns ``(success: bool, error: str, meta: dict)``. ``meta`` carries
+    threading metadata used by the reply-testing flow:
+
+      * ``sender_email``     — connected mailbox the message was sent from
+      * ``sender_provider``  — ``gmail`` / ``outlook`` / ``smtp``
+      * ``message_id``       — the RFC ``Message-Id`` header the recipient
+                                mailbox will see (Gmail: we set it ourselves;
+                                Outlook: we read it back from the draft)
+      * ``thread_id``        — Gmail conversation id (only for ``gmail``)
+      * ``conversation_id``  — Outlook conversation id (only for ``outlook``)
 
     Both Gmail and Outlook receive a multipart message: the plain-text body
     (so it stays readable for clients that strip HTML) plus a minimal HTML
-    body generated from that same plain text. The minimal HTML is what makes
-    Gmail render with the same paragraph width / spacing as Outlook — Gmail
-    otherwise displays plain-text emails in a narrow fixed-width column.
-    We intentionally ignore the upstream AI writer's styled HTML "card" so
-    the message still looks like a normally typed email, not marketing mail.
+    body generated from that same plain text. The minimal HTML is what
+    makes Gmail render with the same paragraph width / spacing as Outlook.
     """
+    meta = {
+        "sender_email": "",
+        "sender_provider": send_method or "smtp",
+        "message_id": "",
+        "thread_id": "",
+        "conversation_id": "",
+    }
     if not to_list:
-        return False, "No recipient addresses"
+        return False, "No recipient addresses", meta
     cc = list(cc or [])
     bcc = list(bcc or [])
     if not (plain_text and plain_text.strip()) and html_content:
@@ -144,29 +164,41 @@ def _do_send_email(
         rt = session.get("google_refresh_token")
         from_addr = session.get("google_email", "")
         if not (cid and cs and rt and from_addr):
-            return False, "Gmail not connected (missing client id/secret/refresh token)"
-        ok = send_gmail(
+            return False, "Gmail not connected (missing client id/secret/refresh token)", meta
+        meta["sender_email"] = from_addr
+        msg_id = generate_message_id()
+        res = send_gmail(
             cid, cs, rt, from_addr, to_list, subject, plain_text, html_content,
             cc=cc, bcc=bcc,
+            message_id=msg_id,
         )
-        return (True, "") if ok else (False, "Gmail send failed (see server logs)")
+        if res.get("success"):
+            meta["message_id"] = res.get("message_id") or msg_id
+            meta["thread_id"] = res.get("thread_id") or ""
+            return True, "", meta
+        return False, res.get("error") or "Gmail send failed (see server logs)", meta
     if send_method == "outlook":
         rt = session.get("microsoft_refresh_token")
         if not rt:
-            return False, "Outlook not connected (no refresh token in session)"
+            return False, "Outlook not connected (no refresh token in session)", meta
         at = get_microsoft_access_token(rt)
         if not at:
-            return False, "Could not refresh Microsoft access token (re-connect Outlook)"
-        ok = send_outlook(
+            return False, "Could not refresh Microsoft access token (re-connect Outlook)", meta
+        meta["sender_email"] = session.get("outlook_email", "") or ""
+        capture = repdb.is_db_enabled()
+        res = send_outlook(
             at, to_list, subject, plain_text,
             html=html_content,
             cc=cc, bcc=bcc,
+            capture_metadata=capture,
         )
-        if ok:
-            return True, ""
-        return False, getattr(send_outlook, "last_error", "") or "Graph send failed"
+        if res.get("success"):
+            meta["message_id"] = res.get("message_id") or ""
+            meta["conversation_id"] = res.get("conversation_id") or ""
+            return True, "", meta
+        return False, res.get("error") or "Graph send failed", meta
     if agent is None:
-        return False, "SMTP agent not initialised"
+        return False, "SMTP agent not initialised", meta
     try:
         ok = agent.email_service.send_email(
             to_email=to_list,
@@ -176,9 +208,11 @@ def _do_send_email(
             cc=cc,
             bcc=bcc,
         )
-        return (True, "") if ok else (False, "SMTP send returned False")
+        if ok:
+            return True, "", meta
+        return False, "SMTP send returned False", meta
     except Exception as e:  # noqa: BLE001
-        return False, f"SMTP error: {e}"
+        return False, f"SMTP error: {e}", meta
 
 
 def _as_bool(v):
@@ -187,6 +221,45 @@ def _as_bool(v):
     if v is None:
         return False
     return str(v).lower() in ("true", "1", "yes", "on")
+
+
+def _persist_send_to_db(
+    *,
+    send_id: str,
+    meta: dict,
+    subject: str,
+    plain_text: str,
+    html_content: str,
+    to_list: list,
+    cc_list: list,
+    bcc_list: list,
+) -> bool:
+    """Persist a successful outgoing email to Neon so the reply-testing UI
+    can later look it up. Silently no-ops when DATABASE_URL is unset.
+    """
+    if not repdb.is_db_enabled():
+        return False
+    if not meta or not meta.get("sender_email") or not meta.get("message_id"):
+        return False
+    recipients = []
+    for a in to_list or []:
+        recipients.append((a, "to"))
+    for a in cc_list or []:
+        recipients.append((a, "cc"))
+    for a in bcc_list or []:
+        recipients.append((a, "bcc"))
+    return repdb.record_send(
+        send_id=send_id,
+        sender_email=meta.get("sender_email", ""),
+        sender_provider=meta.get("sender_provider", ""),
+        subject=subject or "",
+        body_plain=plain_text or "",
+        body_html=html_content or "",
+        message_id=meta.get("message_id", ""),
+        thread_id=meta.get("thread_id", ""),
+        conversation_id=meta.get("conversation_id", ""),
+        recipients=recipients,
+    )
 
 
 def _email_style_directives(
@@ -757,18 +830,39 @@ def send_emails():
                         ),
                     )
 
-                    success, send_err = _do_send_email(
+                    success, send_err, send_meta = _do_send_email(
                         send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
                         cc=cc_list, bcc=bcc_list,
                     )
 
+                    send_id = secrets.token_urlsafe(12)
+                    if success:
+                        _persist_send_to_db(
+                            send_id=send_id,
+                            meta=send_meta,
+                            subject=email_content['subject'],
+                            plain_text=email_content.get('plain_text') or '',
+                            html_content=email_content.get('html_content') or '',
+                            to_list=to_list,
+                            cc_list=cc_list,
+                            bcc_list=bcc_list,
+                        )
+
                     entry = {
                         'type': 'Opportunity',
                         'name': result_name,
                         'status': 'Sent' if success else 'Failed',
                         'number': i,
+                        'send_id': send_id if success else '',
+                        'subject': email_content['subject'],
+                        'sender_email': send_meta.get('sender_email', '') if success else '',
+                        'sender_provider': send_meta.get('sender_provider', ''),
+                        'message_id': send_meta.get('message_id', '') if success else '',
+                        'to': list(to_list),
+                        'cc': list(cc_list),
+                        'bcc': list(bcc_list),
                     }
                     if use_real_opps and source_index_by_name:
                         src_idx = source_index_by_name.get(result_name)
@@ -839,18 +933,39 @@ def send_emails():
                         ),
                     )
 
-                    success, send_err = _do_send_email(
+                    success, send_err, send_meta = _do_send_email(
                         send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
                         cc=cc_list, bcc=bcc_list,
                     )
 
+                    send_id = secrets.token_urlsafe(12)
+                    if success:
+                        _persist_send_to_db(
+                            send_id=send_id,
+                            meta=send_meta,
+                            subject=email_content['subject'],
+                            plain_text=email_content.get('plain_text') or '',
+                            html_content=email_content.get('html_content') or '',
+                            to_list=to_list,
+                            cc_list=cc_list,
+                            bcc_list=bcc_list,
+                        )
+
                     entry = {
                         'type': 'Case',
                         'name': f"Case {case['case_number']}",
                         'status': 'Sent' if success else 'Failed',
                         'number': i,
+                        'send_id': send_id if success else '',
+                        'subject': email_content['subject'],
+                        'sender_email': send_meta.get('sender_email', '') if success else '',
+                        'sender_provider': send_meta.get('sender_provider', ''),
+                        'message_id': send_meta.get('message_id', '') if success else '',
+                        'to': list(to_list),
+                        'cc': list(cc_list),
+                        'bcc': list(bcc_list),
                     }
                     if not success and send_err:
                         entry['error'] = send_err
@@ -993,12 +1108,25 @@ def send_emails():
                         ),
                     )
 
-                    success, send_err = _do_send_email(
+                    success, send_err, send_meta = _do_send_email(
                         send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
                         cc=cc_list, bcc=bcc_list,
                     )
+
+                    send_id = secrets.token_urlsafe(12)
+                    if success:
+                        _persist_send_to_db(
+                            send_id=send_id,
+                            meta=send_meta,
+                            subject=email_content['subject'],
+                            plain_text=email_content.get('plain_text') or '',
+                            html_content=email_content.get('html_content') or '',
+                            to_list=to_list,
+                            cc_list=cc_list,
+                            bcc_list=bcc_list,
+                        )
 
                     # Friendly type names
                     type_names = {
@@ -1018,6 +1146,14 @@ def send_emails():
                         'name': email_content['subject'],
                         'status': 'Sent' if success else 'Failed',
                         'number': i,
+                        'send_id': send_id if success else '',
+                        'subject': email_content['subject'],
+                        'sender_email': send_meta.get('sender_email', '') if success else '',
+                        'sender_provider': send_meta.get('sender_provider', ''),
+                        'message_id': send_meta.get('message_id', '') if success else '',
+                        'to': list(to_list),
+                        'cc': list(cc_list),
+                        'bcc': list(bcc_list),
                     }
                     if business_one_opp_mode and picked_opp_name:
                         src_idx = source_index_by_name_b.get(picked_opp_name)
@@ -1105,6 +1241,10 @@ def auth_google_start():
         return "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_OAUTH_REDIRECT in the server environment.", 503
     state = secrets.token_urlsafe(32)
     session["oauth_state_g"] = state
+    # Persist the intent (sender connect vs. reply-mailbox onboarding) on
+    # the session so the same /callback route can fork. Lets us reuse the
+    # existing Google OAuth redirect URI — no console reconfig needed.
+    session["oauth_intent_g"] = "sender"
     redir = os.getenv("GOOGLE_OAUTH_REDIRECT") or (_public_base_url() + "/api/auth/google/callback")
     params = {
         "client_id": cid,
@@ -1119,8 +1259,53 @@ def auth_google_start():
     return redirect("https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params))
 
 
+@app.route("/api/auth/reply_mailbox/google", methods=["GET"])
+def auth_reply_mailbox_google_start():
+    """Start OAuth for a *test contact* Gmail mailbox.
+
+    Uses the same Google client + redirect URI as the sender flow; the
+    callback inspects ``oauth_intent_g`` and routes the resulting refresh
+    token to Neon (``reply_mailboxes``) instead of the user session.
+
+    Note on scopes: the reply-testing flow only needs ``gmail.send``
+    (plus ``gmail.readonly`` so we can search the contact's inbox for the
+    original message by RFC ``Message-Id`` when threading a reply). The
+    extra ``gmail.readonly`` is intentionally narrower than ``gmail.modify``
+    so the consent screen stays as low-friction as possible.
+    """
+    cid = os.getenv("GOOGLE_CLIENT_ID", "")
+    if not cid or not os.getenv("GOOGLE_CLIENT_SECRET"):
+        return "Google OAuth is not configured.", 503
+    if not repdb.is_db_enabled():
+        return (
+            "Reply-mailbox onboarding requires the Neon database. "
+            "Set DATABASE_URL in your .env first.",
+            503,
+        )
+    state = secrets.token_urlsafe(32)
+    session["oauth_state_g"] = state
+    session["oauth_intent_g"] = "reply_mailbox"
+    redir = os.getenv("GOOGLE_OAUTH_REDIRECT") or (_public_base_url() + "/api/auth/google/callback")
+    params = {
+        "client_id": cid,
+        "redirect_uri": redir,
+        "response_type": "code",
+        "scope": (
+            "https://www.googleapis.com/auth/gmail.send "
+            "https://www.googleapis.com/auth/gmail.readonly "
+            "https://www.googleapis.com/auth/userinfo.email openid"
+        ),
+        "access_type": "offline",
+        "prompt": "consent",
+        "include_granted_scopes": "true",
+        "state": state,
+    }
+    return redirect("https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params))
+
+
 @app.route("/api/auth/google/callback", methods=["GET"])
 def auth_google_callback():
+    intent = session.pop("oauth_intent_g", "sender")
     if request.args.get("error"):
         return redirect("/?gmail_error=access_denied")
     if request.args.get("state") != session.get("oauth_state_g"):
@@ -1140,18 +1325,39 @@ def auth_google_callback():
     if r.status_code != 200:
         return redirect("/?gmail_error=token")
     j = r.json()
-    if j.get("refresh_token"):
-        session["google_refresh_token"] = j["refresh_token"]
-    at = j.get("access_token")
+    refresh_token = j.get("refresh_token") or ""
+    at = j.get("access_token") or ""
+    user_info = get_google_user_info(at) if at else {}
+
+    if intent == "reply_mailbox":
+        user_email = (user_info.get("email") or "").strip().lower()
+        if not (refresh_token and user_email):
+            return redirect("/?reply_mailbox_error=missing_token_or_email")
+        repdb.upsert_reply_mailbox(
+            email=user_email,
+            provider="gmail",
+            refresh_token=refresh_token,
+            scopes=(
+                "https://www.googleapis.com/auth/gmail.send "
+                "https://www.googleapis.com/auth/gmail.readonly"
+            ),
+            display_name=user_info.get("name") or "",
+        )
+        return redirect(
+            "/?reply_mailbox=connected&provider=gmail&email="
+            + urllib.parse.quote(user_email)
+        )
+
+    if refresh_token:
+        session["google_refresh_token"] = refresh_token
     if at:
         session["google_access_token"] = at
-        info = get_google_user_info(at)
-        if info.get("email"):
-            session["google_email"] = info["email"]
-        if info.get("name"):
-            session["google_name"] = info["name"]
-        if info.get("given_name"):
-            session["google_given_name"] = info["given_name"]
+        if user_info.get("email"):
+            session["google_email"] = user_info["email"]
+        if user_info.get("name"):
+            session["google_name"] = user_info["name"]
+        if user_info.get("given_name"):
+            session["google_given_name"] = user_info["given_name"]
     return redirect("/?gmail=connected")
 
 
@@ -1162,6 +1368,7 @@ def auth_outlook_start():
         return "Microsoft OAuth is not configured. Set MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET, and MICROSOFT_OAUTH_REDIRECT on the server.", 503
     state = secrets.token_urlsafe(32)
     session["oauth_state_ms"] = state
+    session["oauth_intent_ms"] = "sender"
     tenant = os.getenv("MICROSOFT_TENANT", "common")
     redir = os.getenv("MICROSOFT_OAUTH_REDIRECT") or (_public_base_url() + "/api/auth/outlook/callback")
     params = {
@@ -1176,8 +1383,52 @@ def auth_outlook_start():
     return redirect(url)
 
 
+@app.route("/api/auth/reply_mailbox/outlook", methods=["GET"])
+def auth_reply_mailbox_outlook_start():
+    """Start OAuth for a *test contact* Outlook mailbox.
+
+    Uses the same Azure app registration + redirect URI as the sender
+    flow; the callback inspects ``oauth_intent_ms`` and stores the
+    refresh token in Neon's ``reply_mailboxes`` instead of the session.
+
+    Requests ``Mail.ReadWrite`` in addition to ``Mail.Send`` because the
+    contact's reply uses Graph's ``/messages/{id}/createReply`` endpoint
+    (which needs read + write on the contact's own mailbox).
+    """
+    cid = os.getenv("MICROSOFT_CLIENT_ID", "")
+    if not cid or not os.getenv("MICROSOFT_CLIENT_SECRET"):
+        return "Microsoft OAuth is not configured.", 503
+    if not repdb.is_db_enabled():
+        return (
+            "Reply-mailbox onboarding requires the Neon database. "
+            "Set DATABASE_URL in your .env first.",
+            503,
+        )
+    state = secrets.token_urlsafe(32)
+    session["oauth_state_ms"] = state
+    session["oauth_intent_ms"] = "reply_mailbox"
+    tenant = os.getenv("MICROSOFT_TENANT", "common")
+    redir = os.getenv("MICROSOFT_OAUTH_REDIRECT") or (_public_base_url() + "/api/auth/outlook/callback")
+    params = {
+        "client_id": cid,
+        "response_type": "code",
+        "redirect_uri": redir,
+        "response_mode": "query",
+        "scope": (
+            "offline_access User.Read openid email "
+            "https://graph.microsoft.com/Mail.Send "
+            "https://graph.microsoft.com/Mail.ReadWrite"
+        ),
+        "state": state,
+        "prompt": "consent",
+    }
+    url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize?{urllib.parse.urlencode(params)}"
+    return redirect(url)
+
+
 @app.route("/api/auth/outlook/callback", methods=["GET"])
 def auth_outlook_callback():
+    intent = session.pop("oauth_intent_ms", "sender")
     if request.args.get("error"):
         return redirect("/?outlook_error=access_denied")
     if request.args.get("state") != session.get("oauth_state_ms"):
@@ -1202,10 +1453,31 @@ def auth_outlook_callback():
     if r.status_code != 200:
         return redirect("/?outlook_error=token")
     j = r.json()
-    if j.get("refresh_token"):
-        session["microsoft_refresh_token"] = j["refresh_token"]
-    if j.get("access_token"):
-        info = get_microsoft_user_info(j["access_token"])
+    refresh_token = j.get("refresh_token") or ""
+    at = j.get("access_token") or ""
+    info = get_microsoft_user_info(at) if at else {}
+
+    if intent == "reply_mailbox":
+        user_email = (info.get("email") or "").strip().lower()
+        if not (refresh_token and user_email):
+            return redirect("/?reply_mailbox_error=missing_token_or_email")
+        repdb.upsert_reply_mailbox(
+            email=user_email,
+            provider="outlook",
+            refresh_token=refresh_token,
+            scopes=(
+                "offline_access Mail.Send Mail.ReadWrite User.Read"
+            ),
+            display_name=info.get("name") or "",
+        )
+        return redirect(
+            "/?reply_mailbox=connected&provider=outlook&email="
+            + urllib.parse.quote(user_email)
+        )
+
+    if refresh_token:
+        session["microsoft_refresh_token"] = refresh_token
+    if at:
         if info.get("email"):
             session["outlook_email"] = info["email"]
         if info.get("name"):
@@ -1400,6 +1672,263 @@ def auth_disconnect():
     if request.is_json or request.path.endswith("disconnect"):
         return jsonify({"success": True})
     return redirect("/")
+
+
+# ---------------------------------------------------------------------------
+# Reply-testing endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.route("/api/reply_mailboxes", methods=["GET"])
+def list_reply_mailboxes_endpoint():
+    """Return the list of OAuth-connected test contact mailboxes."""
+    if not repdb.is_db_enabled():
+        return jsonify({"success": False, "error": "Database not configured", "mailboxes": []})
+    rows = repdb.list_reply_mailboxes()
+    mailboxes = []
+    for r in rows:
+        mailboxes.append({
+            "email": r.get("email"),
+            "provider": r.get("provider"),
+            "display_name": r.get("display_name") or "",
+            "connected_at": r.get("connected_at").isoformat() if r.get("connected_at") else "",
+            "last_used_at": r.get("last_used_at").isoformat() if r.get("last_used_at") else "",
+        })
+    return jsonify({"success": True, "mailboxes": mailboxes})
+
+
+@app.route("/api/reply_mailboxes/<email>", methods=["DELETE"])
+def delete_reply_mailbox_endpoint(email):
+    """Disconnect / forget a test contact mailbox."""
+    if not repdb.is_db_enabled():
+        return jsonify({"success": False, "error": "Database not configured"}), 503
+    ok = repdb.delete_reply_mailbox(email)
+    return jsonify({"success": ok})
+
+
+def _build_reply_recipients(
+    *,
+    send_row: dict,
+    replier_email: str,
+    mode: str,
+) -> tuple:
+    """Compute the To and Cc lists for a reply from ``replier_email``.
+
+    - **Reply**     → To = original sender only; Cc = (none)
+    - **Reply All** → To = original sender; Cc = (original To + original Cc)
+                      minus the replier and minus the sender. BCCs are never
+                      included (the replier never saw them).
+    """
+    sender = (send_row.get("sender_email") or "").strip().lower()
+    replier = (replier_email or "").strip().lower()
+    if not sender:
+        return ([], [])
+    to_list = [sender]
+    if mode != "reply_all":
+        return (to_list, [])
+    others_to = []
+    others_cc = []
+    for r in (send_row.get("recipients") or []):
+        e = (r.get("email") or "").strip().lower()
+        role = (r.get("role") or "").strip().lower()
+        if not e or e == replier or e == sender:
+            continue
+        if role == "to":
+            others_to.append(e)
+        elif role == "cc":
+            others_cc.append(e)
+    cc_list = others_to + others_cc
+    seen = set()
+    deduped = []
+    for a in cc_list:
+        if a in seen:
+            continue
+        seen.add(a)
+        deduped.append(a)
+    return (to_list, deduped)
+
+
+@app.route("/api/get_reply", methods=["POST"])
+def get_reply_endpoint():
+    """Fire an AI-generated reply from a registered contact mailbox.
+
+    Body JSON:
+      {
+        "send_id":         "<send id from /send_emails response>",
+        "replier_email":   "<contact mailbox; must already be onboarded>",
+        "mode":            "reply" | "reply_all",
+        "intent":          "interested" | "asking" | "decline" | ...,
+        "tone_hint":       "<optional free-text>",
+        "parent_reply_id": "<optional — for reply-to-reply chains>"
+      }
+    """
+    if not repdb.is_db_enabled():
+        return jsonify({"success": False, "error": "Database not configured"}), 503
+
+    body = request.get_json(silent=True) or {}
+    send_id = (body.get("send_id") or "").strip()
+    replier_email = (body.get("replier_email") or "").strip().lower()
+    mode = (body.get("mode") or "reply").lower().strip()
+    if mode not in ("reply", "reply_all"):
+        mode = "reply"
+    intent_key = (body.get("intent") or "asking").lower().strip()
+    tone_hint = (body.get("tone_hint") or "").strip()
+    parent_reply_id = (body.get("parent_reply_id") or "").strip() or None
+
+    if not (send_id and replier_email):
+        return jsonify({"success": False, "error": "send_id and replier_email are required"}), 400
+
+    send_row = repdb.get_send(send_id)
+    if not send_row:
+        return jsonify({"success": False, "error": "Original send not found"}), 404
+
+    mailbox = repdb.get_reply_mailbox(replier_email)
+    if not mailbox:
+        return jsonify({
+            "success": False,
+            "error": "Reply mailbox not connected — onboard it first via the Reply mailboxes panel.",
+            "needs_onboarding": True,
+            "email": replier_email,
+        }), 400
+
+    provider = (mailbox.get("provider") or "").lower()
+    refresh_token = mailbox.get("refresh_token") or ""
+    if not refresh_token:
+        return jsonify({"success": False, "error": "Stored refresh token is empty — reconnect this mailbox."}), 400
+
+    parent_row = None
+    if parent_reply_id:
+        parent_row = repdb.get_reply(parent_reply_id)
+        if not parent_row:
+            return jsonify({"success": False, "error": "Parent reply not found"}), 404
+
+    if parent_row:
+        original_subject = parent_row.get("subject") or send_row.get("subject") or ""
+        original_body = parent_row.get("body_plain") or ""
+        original_sender_email = parent_row.get("replier_email") or ""
+        in_reply_to_id = parent_row.get("message_id") or ""
+    else:
+        original_subject = send_row.get("subject") or ""
+        original_body = send_row.get("body_plain") or ""
+        original_sender_email = send_row.get("sender_email") or ""
+        in_reply_to_id = send_row.get("message_id") or ""
+
+    composed = ai_compose_reply(
+        original_subject=original_subject,
+        original_body_plain=original_body,
+        original_sender_email=original_sender_email,
+        replier_email=replier_email,
+        replier_name=mailbox.get("display_name") or "",
+        intent=intent_key,
+        mode=mode,
+        tone_hint=tone_hint,
+    )
+    reply_body = composed.get("body") or ""
+    reply_subject = original_subject if original_subject.lower().startswith("re:") else f"Re: {original_subject}"
+
+    to_list, cc_list = _build_reply_recipients(
+        send_row=send_row,
+        replier_email=replier_email,
+        mode=mode,
+    )
+    if not to_list:
+        return jsonify({"success": False, "error": "Could not determine reply recipient (no original sender on file)"}), 400
+
+    reply_id = secrets.token_urlsafe(12)
+    new_message_id = ""
+    error_text = ""
+    success = False
+
+    if provider == "gmail":
+        cid = os.getenv("GOOGLE_CLIENT_ID", "")
+        cs = os.getenv("GOOGLE_CLIENT_SECRET", "")
+        if not (cid and cs):
+            return jsonify({"success": False, "error": "Google OAuth client is not configured on the server"}), 503
+
+        thread_id = ""
+        if in_reply_to_id:
+            _, thread_id = find_gmail_thread_id_by_message_id(
+                cid, cs, refresh_token, in_reply_to_id
+            )
+
+        plain_for_send = reply_body
+        html_for_send = _plain_text_to_minimal_html(plain_for_send)
+        new_msg_id = generate_message_id()
+        send_res = send_gmail(
+            cid, cs, refresh_token,
+            replier_email,
+            to_list,
+            reply_subject,
+            plain_for_send,
+            html_for_send,
+            cc=cc_list,
+            message_id=new_msg_id,
+            in_reply_to=in_reply_to_id or None,
+            references=in_reply_to_id or None,
+            thread_id=thread_id or None,
+            extra_headers={"X-Gptfy-Reply-Id": reply_id, "X-Gptfy-Send-Id": send_id},
+        )
+        success = bool(send_res.get("success"))
+        new_message_id = send_res.get("message_id") or new_msg_id
+        error_text = send_res.get("error") or ""
+    elif provider == "outlook":
+        access_token = get_microsoft_access_token(refresh_token)
+        if not access_token:
+            return jsonify({"success": False, "error": "Could not refresh Microsoft token — reconnect this mailbox."}), 400
+        if not in_reply_to_id:
+            return jsonify({"success": False, "error": "Original Message-Id missing — cannot thread via Graph reply endpoint."}), 400
+        plain_for_send = reply_body
+        html_for_send = _plain_text_to_minimal_html(plain_for_send)
+        res = reply_outlook(
+            access_token,
+            original_internet_message_id=in_reply_to_id,
+            reply_body_plain=plain_for_send,
+            reply_body_html=html_for_send,
+            additional_cc=cc_list if mode == "reply_all" else None,
+            reply_all=(mode == "reply_all"),
+        )
+        success = bool(res.get("success"))
+        new_message_id = res.get("message_id") or ""
+        error_text = res.get("error") or ""
+    else:
+        return jsonify({"success": False, "error": f"Unknown provider: {provider}"}), 400
+
+    repdb.record_reply(
+        reply_id=reply_id,
+        send_id=send_id,
+        parent_reply_id=parent_reply_id,
+        replier_email=replier_email,
+        mode=mode,
+        intent=composed.get("intent") or intent_key,
+        subject=reply_subject,
+        body_plain=reply_body,
+        message_id=new_message_id,
+        to_emails=",".join(to_list),
+        cc_emails=",".join(cc_list),
+        status="sent" if success else "failed",
+        error=error_text,
+    )
+    if success:
+        repdb.mark_reply_mailbox_used(replier_email)
+
+    return jsonify({
+        "success": success,
+        "error": error_text,
+        "reply": {
+            "reply_id": reply_id,
+            "send_id": send_id,
+            "parent_reply_id": parent_reply_id,
+            "replier_email": replier_email,
+            "mode": mode,
+            "intent": composed.get("intent") or intent_key,
+            "subject": reply_subject,
+            "body": reply_body,
+            "to": to_list,
+            "cc": cc_list,
+            "message_id": new_message_id,
+            "source": composed.get("source") or "ai",
+        },
+    })
 
 
 if __name__ == '__main__':
