@@ -167,7 +167,12 @@ def _do_send_email(
         if not (cid and cs and rt and from_addr):
             return False, "Gmail not connected (missing client id/secret/refresh token)", meta
         meta["sender_email"] = from_addr
-        msg_id = generate_message_id()
+        # Use the sender's email domain as the Message-Id host so Gmail
+        # doesn't rewrite the header (which would break In-Reply-To
+        # threading on the inbound reply, leaving the original send + the
+        # first reply in two separate Gmail conversations).
+        sender_host = from_addr.split("@", 1)[1].strip() if "@" in from_addr else None
+        msg_id = generate_message_id(sender_host)
         res = send_gmail(
             cid, cs, rt, from_addr, to_list, subject, plain_text, html_content,
             cc=cc, bcc=bcc,
@@ -2054,7 +2059,12 @@ def get_reply_endpoint():
 
         plain_for_send = reply_body
         html_for_send = _plain_text_to_minimal_html(plain_for_send)
-        new_msg_id = generate_message_id()
+        # Match the Message-Id host to the replier's domain so Gmail keeps
+        # the header verbatim — same reasoning as the original send path.
+        replier_host = (
+            replier_email.split("@", 1)[1].strip() if "@" in replier_email else None
+        )
+        new_msg_id = generate_message_id(replier_host)
         send_res = send_gmail(
             cid, cs, refresh_token,
             replier_email,

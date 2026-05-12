@@ -25,9 +25,19 @@ def generate_message_id(domain: Optional[str] = None) -> str:
     use the same value for outbound Gmail (which honours the MIME header
     directly) and as a custom ``X-Gptfy-Message-Id`` header for Outlook
     (since Graph generates its own internetMessageId).
+
+    ``domain`` should be the sender's email domain when known. Gmail will
+    rewrite a ``Message-ID`` whose host part does not match the sender's
+    domain (or, in some cases, the receiving server will), and that rewrite
+    silently breaks ``In-Reply-To`` matching for subsequent replies — which
+    is why the first inbound reply doesn't thread with the original send.
+    Passing the sender domain keeps the header intact end-to-end.
     """
-    host = (domain or socket.gethostname() or "gptfy.local").strip() or "gptfy.local"
-    return f"<{uuid.uuid4().hex}.{int(time.time())}@{host}>"
+    raw_host = (domain or socket.gethostname() or "gptfy.local").strip() or "gptfy.local"
+    # Defensive: if a full email address slipped through, keep only the host.
+    if "@" in raw_host:
+        raw_host = raw_host.rsplit("@", 1)[-1].strip() or "gptfy.local"
+    return f"<{uuid.uuid4().hex}.{int(time.time())}@{raw_host}>"
 
 
 def get_google_user_email(access_token: str) -> str:
@@ -227,9 +237,14 @@ def send_gmail(
         resp = service.users().messages().send(userId="me", body=body).execute() or {}
         result["success"] = True
         result["thread_id"] = resp.get("threadId", "") or ""
-        # If the caller didn't pre-set Message-ID, fetch it back so we know
-        # what the recipient mailboxes will see in ``Message-ID``.
-        if not result["message_id"] and resp.get("id"):
+        # ALWAYS read the actual Message-Id back from Gmail — even when we
+        # pre-set it ourselves. Gmail (or the next hop) sometimes rewrites
+        # the header when the host part doesn't match the sender's domain,
+        # and a stale value here silently breaks ``In-Reply-To`` threading
+        # for every subsequent reply (the recipient inbox can't find the
+        # message we're claiming to reply to). The actual sent value is the
+        # one recipient mailboxes use for matching, so that's what we store.
+        if resp.get("id"):
             try:
                 msg_meta = (
                     service.users()
@@ -245,7 +260,9 @@ def send_gmail(
                 )
                 for h in (msg_meta.get("payload") or {}).get("headers") or []:
                     if (h.get("name") or "").lower() == "message-id":
-                        result["message_id"] = h.get("value") or ""
+                        actual_mid = h.get("value") or ""
+                        if actual_mid:
+                            result["message_id"] = actual_mid
                         break
             except Exception:  # noqa: BLE001
                 pass
