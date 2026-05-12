@@ -19,6 +19,10 @@ _OPP_SOQL_FIELDS = (
     "IsClosed, LastModifiedDate"
 )
 
+_CONTACT_SOQL_FIELDS = (
+    "Id, FirstName, LastName, Name, Email, Title, Phone"
+)
+
 
 def _escape_soql_string(s: str) -> str:
     """SOQL string literal: escape single quotes by doubling them."""
@@ -66,6 +70,41 @@ def fetch_opportunities_for_account(sf, account_id: str, limit: int = 50) -> Lis
     )
     res = sf.query(q_open)
     return list(res.get("records") or [])
+
+
+def fetch_contacts_for_account(sf, account_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Fetch Contacts associated with the given Account.
+
+    Only contacts with a non-empty Email are useful as recipients, so we filter
+    those out at the SOQL layer. Ordered by most recently modified so the most
+    relevant contacts surface first.
+    """
+    aid = _escape_soql_string(account_id)
+    q = (
+        f"SELECT {_CONTACT_SOQL_FIELDS} FROM Contact "
+        f"WHERE AccountId = '{aid}' AND Email != null "
+        f"ORDER BY LastModifiedDate DESC "
+        f"LIMIT {limit}"
+    )
+    res = sf.query(q)
+    return list(res.get("records") or [])
+
+
+def structure_contact(c: Dict[str, Any]) -> Dict[str, Any]:
+    """Project a raw SOQL Contact record into a slim dict for the UI."""
+    first = (c.get("FirstName") or "").strip()
+    last = (c.get("LastName") or "").strip()
+    full = (c.get("Name") or " ".join(p for p in [first, last] if p)).strip()
+    return {
+        "id": c.get("Id"),
+        "name": full,
+        "first_name": first,
+        "last_name": last,
+        "email": (c.get("Email") or "").strip(),
+        "title": (c.get("Title") or "").strip(),
+        "phone": (c.get("Phone") or "").strip(),
+    }
 
 
 def _fmt_money(v: Any) -> str:
@@ -219,6 +258,7 @@ def resolve_account_bundle(sf, lookup: str) -> Dict[str, Any]:
         if not acc:
             return {"ok": False, "error": "No Account found for that Id."}
         opps = fetch_opportunities_for_account(sf, acc["Id"])
+        contacts = fetch_contacts_for_account(sf, acc["Id"])
         aname, obrief = format_account_and_opportunities(acc, opps)
         return {
             "ok": True,
@@ -226,6 +266,7 @@ def resolve_account_bundle(sf, lookup: str) -> Dict[str, Any]:
             "account_name": aname,
             "opportunity_text": obrief,
             "opportunities": _structured_open_opportunities(opps, aname),
+            "contacts": [structure_contact(c) for c in contacts],
         }
 
     matches = find_accounts_by_name(sf, raw)
@@ -255,6 +296,7 @@ def resolve_account_bundle(sf, lookup: str) -> Dict[str, Any]:
     if not acc_full:
         return {"ok": False, "error": "Could not load Account details."}
     opps = fetch_opportunities_for_account(sf, acc_full["Id"])
+    contacts = fetch_contacts_for_account(sf, acc_full["Id"])
     aname, obrief = format_account_and_opportunities(acc_full, opps)
     return {
         "ok": True,
@@ -262,4 +304,5 @@ def resolve_account_bundle(sf, lookup: str) -> Dict[str, Any]:
         "account_name": aname,
         "opportunity_text": obrief,
         "opportunities": _structured_open_opportunities(opps, aname),
+        "contacts": [structure_contact(c) for c in contacts],
     }

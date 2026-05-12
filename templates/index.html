@@ -11,45 +11,104 @@
             box-sizing: border-box;
         }
 
+        html, body {
+            height: 100vh;
+        }
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
+            padding: 0;
+            overflow: hidden;
         }
 
         .container {
-            max-width: 800px;
-            margin: 0 auto;
+            width: 100%;
+            height: 100vh;
+            margin: 0;
             background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            border-radius: 0;
+            box-shadow: none;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
 
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 40px;
+            padding: 16px 32px;
             text-align: center;
+            flex-shrink: 0;
         }
 
         .header h1 {
-            font-size: 32px;
-            margin-bottom: 10px;
+            font-size: 22px;
+            margin-bottom: 4px;
         }
 
         .header p {
-            font-size: 16px;
+            font-size: 13px;
             opacity: 0.9;
         }
 
         .form-container {
-            padding: 40px;
+            flex: 1;
+            min-height: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        #emailForm {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .workspace {
+            flex: 1;
+            min-height: 0;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            overflow: hidden;
+        }
+
+        .workspace-column {
+            overflow-y: auto;
+            padding: 24px 32px;
+            min-height: 0;
+        }
+
+        .workspace-column-left {
+            border-right: 1px solid #e0e0e0;
+            background: #fafbff;
+        }
+
+        .workspace-column-right {
+            background: #ffffff;
+        }
+
+        .workspace-column-title {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1.4px;
+            text-transform: uppercase;
+            color: #888;
+            margin-bottom: 18px;
+            padding-bottom: 10px;
+            border-bottom: 1px dashed #d0d4e3;
         }
 
         .form-section {
-            margin-bottom: 30px;
+            margin-bottom: 28px;
+        }
+
+        .form-section:last-child {
+            margin-bottom: 0;
         }
 
         .form-section h2 {
@@ -388,6 +447,35 @@
             margin-top: 8px;
         }
 
+        /* Below 1100px collapse the two columns and let the page scroll normally */
+        @media (max-width: 1100px) {
+            html, body {
+                height: auto;
+            }
+            body {
+                overflow: auto;
+            }
+            .container {
+                height: auto;
+                min-height: 100vh;
+            }
+            .form-container,
+            #emailForm {
+                overflow: visible;
+            }
+            .workspace {
+                grid-template-columns: 1fr;
+                overflow: visible;
+            }
+            .workspace-column {
+                overflow: visible;
+            }
+            .workspace-column-left {
+                border-right: none;
+                border-bottom: 1px solid #e0e0e0;
+            }
+        }
+
         @media (max-width: 768px) {
             .form-row {
                 grid-template-columns: 1fr;
@@ -398,11 +486,11 @@
             }
 
             .header h1 {
-                font-size: 24px;
+                font-size: 20px;
             }
 
-            .form-container {
-                padding: 20px;
+            .workspace-column {
+                padding: 18px 20px;
             }
         }
     </style>
@@ -416,6 +504,9 @@
 
         <div class="form-container">
             <form id="emailForm">
+                <div class="workspace">
+                    <div class="workspace-column workspace-column-left">
+                        <div class="workspace-column-title">⚙️ Setup &amp; Connections</div>
                 <!-- Sender Information -->
                 <div class="form-section">
                     <h2>📤 Sender Information</h2>
@@ -465,31 +556,9 @@
                     </div>
                 </div>
 
-                <!-- Recipient Information -->
-                <div class="form-section">
-                    <h2>📥 Recipients</h2>
-                    <p style="color: #666; font-size: 14px; margin-bottom: 12px;">To is required. Add multiple addresses with commas, semicolons, or one per line. CC and BCC are optional.</p>
-                    <div class="form-group">
-                        <label for="to_emails">To <span class="required">*</span></label>
-                        <textarea id="to_emails" class="recipient-emails" rows="3" required placeholder="alice@example.com, bob@example.com"></textarea>
-                        <span class="field-hint">At least one email. Multiple: comma, semicolon, or new line.</span>
-                    </div>
-                    <div class="form-group">
-                        <label for="cc_emails">CC</label>
-                        <textarea id="cc_emails" class="recipient-emails" rows="2" placeholder="cc1@example.com, cc2@example.com"></textarea>
-                        <span class="field-hint">Optional carbon copies (multiple allowed).</span>
-                    </div>
-                    <div class="form-group">
-                        <label for="bcc_emails">BCC</label>
-                        <textarea id="bcc_emails" class="recipient-emails" rows="2" placeholder="hidden@example.com"></textarea>
-                        <span class="field-hint">Optional blind copies; addresses are not shown to other recipients.</span>
-                    </div>
-                </div>
-
-                <!-- Optional Salesforce context -->
+                <!-- Optional Salesforce context (left column) -->
                 <div class="form-section">
                     <h2>📋 Salesforce context (optional)</h2>
-                    <p style="color: #666; font-size: 14px; margin-bottom: 10px;">Leave the box below unchecked to generate emails with random sample context. Check it to align every email with a real Salesforce account and its open opportunities — one opportunity per email.</p>
 
                     <!-- Org connection: always visible so you can authorize before enabling custom context -->
                     <div id="sfOrgConnectStrip" style="margin-bottom: 18px; padding: 16px; background: #f0f4ff; border-radius: 8px; border: 1px solid #c5cae9;">
@@ -500,7 +569,6 @@
                             <a href="/salesforce/setup" class="btn" id="linkEditSfSettings" style="display: none; text-align: center; text-decoration: none; width: auto; padding: 10px 20px; margin-right: 8px; background: #fff; color: #4a5cdc; border: 1px solid #4a5cdc;">Edit OAuth settings</a>
                             <button type="button" class="btn" id="btnDisconnectSf" style="display: none; width: auto; padding: 10px 20px; background: #666;">Disconnect org</button>
                         </div>
-                        <p style="color: #555; font-size: 13px; margin: 0;">You'll be asked for your Connected App's Consumer Key, Secret, and Login URL. Anyone can connect their own org — no server-side <code>.env</code> required.</p>
                     </div>
 
                     <label class="topic-checkbox-item" style="margin-bottom: 14px;">
@@ -529,8 +597,28 @@
                         <div class="form-group" style="margin-bottom: 0;">
                             <label>Or upload a file / screenshot</label>
                             <input type="file" id="sfOppFile" accept=".txt,.md,.text,.png,.jpg,.jpeg,.gif,.webp" style="width: 100%;">
-                            <small style="color: #666; display: block; margin-top: 6px;"><strong>Best results:</strong> paste Account name, Opportunity name, Stage, Amount, and Close date into the text box above. Screenshots are read with local OCR (Tesseract) when available, and otherwise transcribed by the configured OpenAI vision model — so image uploads work on cloud hosts too as long as the OpenAI key is set.</small>
                         </div>
+                    </div>
+                </div>
+                    </div><!-- /workspace-column-left -->
+
+                    <div class="workspace-column workspace-column-right">
+                        <div class="workspace-column-title">📨 Compose &amp; Send</div>
+                <!-- Recipient Information (right column) -->
+                <div class="form-section">
+                    <h2>📥 Recipients</h2>
+                    <p style="color: #666; font-size: 14px; margin-bottom: 12px;">To is required. Add multiple addresses with commas, semicolons, or one per line. CC and BCC are optional.</p>
+                    <div class="form-group">
+                        <label for="to_emails">To <span class="required">*</span></label>
+                        <textarea id="to_emails" class="recipient-emails" rows="3" required placeholder="alice@example.com, bob@example.com"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="cc_emails">CC</label>
+                        <textarea id="cc_emails" class="recipient-emails" rows="2" placeholder="cc1@example.com, cc2@example.com"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="bcc_emails">BCC</label>
+                        <textarea id="bcc_emails" class="recipient-emails" rows="2" placeholder="hidden@example.com"></textarea>
                     </div>
                 </div>
 
@@ -540,17 +628,12 @@
                     <div class="form-group">
                         <label>No. of emails to send</label>
                         <input type="number" id="num_business" min="0" value="0" placeholder="0">
-                        <small style="color: #666; font-size: 12px; display: block; margin-top: 4px;">When a Salesforce account is loaded above, each email is anchored to one of that account's open opportunities (random pick, cycled if you ask for more emails than opportunities).</small>
                         <label style="margin-top: 12px; margin-bottom: 6px; display: block; font-size: 14px; color: #333;">Topic selection</label>
                         <div class="segment-control">
                             <button type="button" class="segment-option active" data-mode="default" id="segmentDefault">Default</button>
                             <button type="button" class="segment-option" data-mode="custom" id="segmentCustom">Custom</button>
                         </div>
-                        <div id="defaultHint" class="default-hint">
-                            <small style="color: #666; font-size: 12px;">
-                                ℹ️ Auto-distributes evenly across all 9 topics: Meeting, Follow-up, Thank You, Project Update, Reminder, Trial Feedback, Product Queries, Product Issues, Demo Enquiry
-                            </small>
-                        </div>
+                        <div id="defaultHint" class="default-hint"></div>
                         <div id="customTopics" class="topic-checkboxes">
                             <small style="color: #666; font-size: 12px; display: block; margin-bottom: 10px;">Select the topics to include:</small>
                             <label class="topic-checkbox-item"><input type="checkbox" name="topic" value="meeting_invitation"> Meeting Invitation</label>
@@ -574,41 +657,43 @@
                 </div>
 
                 <div id="sendingAsBadge" style="margin: 16px 0 10px; padding: 12px 14px; background: #f0f4ff; border: 1px solid #c5cae9; border-radius: 8px; color: #333; font-size: 14px; line-height: 1.4;">
-                    Choose a send method above.
+                    Choose a send method on the left.
                 </div>
                 <button type="submit" class="btn" id="submitBtn">
                     🚀 Send Emails
                 </button>
-            </form>
 
-            <div class="loading" id="loading">
-                <div class="spinner"></div>
-                <p>Generating and sending emails...</p>
-            </div>
-
-            <div class="error-message" id="errorMessage"></div>
-            <div class="success-message" id="successMessage"></div>
-
-            <div class="results" id="results">
-                <h2 style="margin-bottom: 20px; color: #667eea;">📊 Results</h2>
-
-                <div class="summary" id="summary">
-                    <div class="summary-card">
-                        <h3>Total Sent</h3>
-                        <p id="totalSent">0</p>
-                    </div>
-                    <div class="summary-card">
-                        <h3>Failed</h3>
-                        <p id="totalFailed" style="color: #c62828;">0</p>
-                    </div>
-                    <div class="summary-card">
-                        <h3>Success Rate</h3>
-                        <p id="successRate">0%</p>
-                    </div>
+                <div class="loading" id="loading">
+                    <div class="spinner"></div>
+                    <p>Generating and sending emails...</p>
                 </div>
 
-                <div class="email-list" id="emailList"></div>
-            </div>
+                <div class="error-message" id="errorMessage"></div>
+                <div class="success-message" id="successMessage"></div>
+
+                <div class="results" id="results">
+                    <h2 style="margin-bottom: 20px; color: #667eea;">📊 Results</h2>
+
+                    <div class="summary" id="summary">
+                        <div class="summary-card">
+                            <h3>Total Sent</h3>
+                            <p id="totalSent">0</p>
+                        </div>
+                        <div class="summary-card">
+                            <h3>Failed</h3>
+                            <p id="totalFailed" style="color: #c62828;">0</p>
+                        </div>
+                        <div class="summary-card">
+                            <h3>Success Rate</h3>
+                            <p id="successRate">0%</p>
+                        </div>
+                    </div>
+
+                    <div class="email-list" id="emailList"></div>
+                </div>
+                    </div><!-- /workspace-column-right -->
+                </div><!-- /workspace -->
+            </form>
         </div>
     </div>
 
@@ -646,7 +731,7 @@
                 } else {
                     el.style.background = '#fff3e0';
                     el.style.borderColor = '#ffcc80';
-                    el.innerHTML = '⚠️ Gmail is selected but <strong>not connected</strong>. Click <strong>Connect Google</strong> above first, or pick a different send method.';
+                    el.innerHTML = '⚠️ Gmail is selected but <strong>not connected</strong>. Click <strong>Connect Google</strong> on the left first, or pick a different send method.';
                 }
             } else if (method === 'outlook') {
                 if (s.outlook_connected) {
@@ -657,12 +742,12 @@
                 } else {
                     el.style.background = '#fff3e0';
                     el.style.borderColor = '#ffcc80';
-                    el.innerHTML = '⚠️ Outlook is selected but <strong>not connected</strong>. Click <strong>Connect Microsoft</strong> above first, or pick a different send method.';
+                    el.innerHTML = '⚠️ Outlook is selected but <strong>not connected</strong>. Click <strong>Connect Microsoft</strong> on the left first, or pick a different send method.';
                 }
             } else {
                 el.style.background = '#f0f4ff';
                 el.style.borderColor = '#c5cae9';
-                const who = sEmail ? '<strong>' + sEmail + '</strong>' : 'the address you enter below';
+                const who = sEmail ? '<strong>' + sEmail + '</strong>' : 'the address you enter on the left';
                 el.innerHTML = '✉️ Sending as: ' + who + ' &nbsp;·&nbsp; via SMTP (app password)';
             }
         }
@@ -684,11 +769,37 @@
                     document.getElementById('btnDisconnectGmail').style.display = s.gmail_connected ? 'inline-block' : 'none';
                     document.getElementById('btnDisconnectOutlook').style.display = s.outlook_connected ? 'inline-block' : 'none';
                     const gLink = document.getElementById('linkConnectGoogle');
-                    gLink.style.pointerEvents = s.google_configured ? 'auto' : 'none';
-                    gLink.style.opacity = s.google_configured ? '1' : '0.5';
+                    const gActive = !!s.google_configured && !s.gmail_connected;
+                    gLink.style.pointerEvents = gActive ? 'auto' : 'none';
+                    gLink.style.opacity = gActive ? '1' : '0.5';
+                    gLink.style.cursor = gActive ? 'pointer' : 'not-allowed';
+                    if (s.gmail_connected) {
+                        gLink.setAttribute('aria-disabled', 'true');
+                        gLink.setAttribute('tabindex', '-1');
+                        gLink.textContent = '✓ Connected';
+                        gLink.title = 'Gmail is already connected. Click Disconnect to sign out.';
+                    } else {
+                        gLink.removeAttribute('aria-disabled');
+                        gLink.removeAttribute('tabindex');
+                        gLink.textContent = 'Connect Google';
+                        gLink.removeAttribute('title');
+                    }
                     const oLink = document.getElementById('linkConnectOutlook');
-                    oLink.style.pointerEvents = s.microsoft_configured ? 'auto' : 'none';
-                    oLink.style.opacity = s.microsoft_configured ? '1' : '0.5';
+                    const oActive = !!s.microsoft_configured && !s.outlook_connected;
+                    oLink.style.pointerEvents = oActive ? 'auto' : 'none';
+                    oLink.style.opacity = oActive ? '1' : '0.5';
+                    oLink.style.cursor = oActive ? 'pointer' : 'not-allowed';
+                    if (s.outlook_connected) {
+                        oLink.setAttribute('aria-disabled', 'true');
+                        oLink.setAttribute('tabindex', '-1');
+                        oLink.textContent = '✓ Connected';
+                        oLink.title = 'Outlook is already connected. Click Disconnect to sign out.';
+                    } else {
+                        oLink.removeAttribute('aria-disabled');
+                        oLink.removeAttribute('tabindex');
+                        oLink.textContent = 'Connect Microsoft';
+                        oLink.removeAttribute('title');
+                    }
 
                     const sfSt = document.getElementById('sfOrgStatus');
                     const sfLink = document.getElementById('linkConnectSf');
@@ -768,6 +879,21 @@
                     var incO = document.getElementById('includeOpportunity');
                     if (incA) incA.checked = true;
                     if (incO) incO.checked = true;
+
+                    // Populate To with the first contact and push the rest into
+                    // CC. Only contacts with a real email come back from the
+                    // server, so the join is safe.
+                    var contacts = Array.isArray(result.contacts) ? result.contacts : [];
+                    var toEl = document.getElementById('to_emails');
+                    var ccEl = document.getElementById('cc_emails');
+                    if (contacts.length && toEl) {
+                        var emails = contacts.map(function(c) { return c.email; }).filter(Boolean);
+                        toEl.value = emails[0] || '';
+                        if (ccEl) {
+                            ccEl.value = emails.slice(1).join(', ');
+                        }
+                    }
+
                     document.getElementById('successMessage').textContent = 'Loaded Account context from Salesforce.';
                     document.getElementById('successMessage').classList.add('show');
                 } else if (result.needs_pick && result.matches && result.matches.length) {

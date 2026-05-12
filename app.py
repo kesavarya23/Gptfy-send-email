@@ -1340,6 +1340,7 @@ def salesforce_fetch_account():
         # against the wrong account.
         session.pop("sf_account_opportunities", None)
         session.pop("sf_account_name_loaded", None)
+        session.pop("sf_account_contacts", None)
         return jsonify({"success": False, "error": result.get("error") or "Lookup failed."}), 400
 
     # Persist the structured per-opp list in the session so /send_emails can
@@ -1347,9 +1348,11 @@ def salesforce_fetch_account():
     # loaded against, so we only use these opps when the user keeps that same
     # account in the form (a manual edit invalidates the cache).
     opportunities = result.get("opportunities") or []
+    contacts = result.get("contacts") or []
     aname = result.get("account_name") or ""
     session["sf_account_opportunities"] = opportunities
     session["sf_account_name_loaded"] = aname
+    session["sf_account_contacts"] = contacts
 
     return jsonify({
         "success": True,
@@ -1357,6 +1360,8 @@ def salesforce_fetch_account():
         "account_name": aname,
         "opportunity_text": result.get("opportunity_text"),
         "opportunity_count": len(opportunities),
+        "contacts": contacts,
+        "contact_count": len(contacts),
     })
 
 
@@ -1389,6 +1394,7 @@ def auth_disconnect():
         # disconnected org and must never leak into a different connection.
         session.pop("sf_account_opportunities", None)
         session.pop("sf_account_name_loaded", None)
+        session.pop("sf_account_contacts", None)
         # Also drop saved Connected App credentials so the user can paste a new org.
         clear_sf_oauth_config(session)
     if request.is_json or request.path.endswith("disconnect"):
