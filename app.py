@@ -1376,8 +1376,18 @@ def auth_outlook_start():
         "response_type": "code",
         "redirect_uri": redir,
         "response_mode": "query",
-        "scope": "offline_access User.Read openid email https://graph.microsoft.com/Mail.Send",
+        # Mail.ReadWrite is needed by the reply-testing flow so /send_emails
+        # can use Graph's "create draft → send draft" pattern (which is the
+        # only way to read back internetMessageId + conversationId from a
+        # send for later reply threading). Mail.Send alone returns 403 on
+        # POST /me/messages.
+        "scope": (
+            "offline_access User.Read openid email "
+            "https://graph.microsoft.com/Mail.Send "
+            "https://graph.microsoft.com/Mail.ReadWrite"
+        ),
         "state": state,
+        "prompt": "consent",
     }
     url = f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize?{urllib.parse.urlencode(params)}"
     return redirect(url)
@@ -1876,7 +1886,16 @@ def get_reply_endpoint():
         if not access_token:
             return jsonify({"success": False, "error": "Could not refresh Microsoft token — reconnect this mailbox."}), 400
         if not in_reply_to_id:
-            return jsonify({"success": False, "error": "Original Message-Id missing — cannot thread via Graph reply endpoint."}), 400
+            return jsonify({
+                "success": False,
+                "error": (
+                    "This send was delivered without reply-threading metadata "
+                    "(your Outlook sender token only had Mail.Send, not "
+                    "Mail.ReadWrite). Disconnect Outlook on the left, click "
+                    "Connect Microsoft again to grant the wider scope, then "
+                    "send a fresh test email."
+                ),
+            }), 400
         plain_for_send = reply_body
         html_for_send = _plain_text_to_minimal_html(plain_for_send)
         res = reply_outlook(

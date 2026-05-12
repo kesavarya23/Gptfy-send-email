@@ -378,6 +378,43 @@ def send_outlook(
         send_outlook.last_error = result["error"]  # type: ignore[attr-defined]
         logger.error("Graph create draft network error: %s", e)
         return result
+    # Graceful degradation: if the connected mailbox only granted Mail.Send
+    # (e.g. token was issued before we widened the scope to Mail.ReadWrite),
+    # POST /me/messages returns 403 ErrorAccessDenied. Fall back to the
+    # fire-and-forget sendMail endpoint so the email still goes out — we
+    # just won't be able to thread inbound replies for THIS particular
+    # message until the user disconnects and reconnects Outlook to grant
+    # the wider scope.
+    if r.status_code == 403:
+        logger.warning(
+            "Graph create-draft returned 403 (likely missing Mail.ReadWrite). "
+            "Falling back to sendMail without metadata capture."
+        )
+        try:
+            f = requests.post(
+                "https://graph.microsoft.com/v1.0/me/sendMail",
+                headers=hdr,
+                json={"message": message},
+                timeout=60,
+            )
+        except requests.RequestException as e:
+            result["error"] = f"network fallback sendMail: {e}"
+            send_outlook.last_error = result["error"]  # type: ignore[attr-defined]
+            return result
+        if f.status_code not in (200, 202, 204):
+            result["error"] = (
+                f"create draft 403 (needs Mail.ReadWrite) and sendMail fallback "
+                f"HTTP {f.status_code}: {f.text}"
+            )
+            send_outlook.last_error = result["error"]  # type: ignore[attr-defined]
+            return result
+        result["success"] = True
+        # We don't populate message_id / conversation_id here — the caller
+        # will simply have nothing to thread an inbound reply against on
+        # this particular message. Surfacing this nicely in the UI is the
+        # /api/get_reply endpoint's job (it returns "Original Message-Id
+        # missing — reconnect Outlook to grant Mail.ReadWrite").
+        return result
     if r.status_code not in (200, 201):
         result["error"] = f"create draft HTTP {r.status_code}: {r.text}"
         send_outlook.last_error = result["error"]  # type: ignore[attr-defined]
