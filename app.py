@@ -1332,7 +1332,7 @@ def auth_google_callback():
     if intent == "reply_mailbox":
         user_email = (user_info.get("email") or "").strip().lower()
         if not (refresh_token and user_email):
-            return redirect("/?reply_mailbox_error=missing_token_or_email")
+            return redirect("/reply_mailboxes/setup?reply_mailbox_error=missing_token_or_email")
         repdb.upsert_reply_mailbox(
             email=user_email,
             provider="gmail",
@@ -1344,7 +1344,7 @@ def auth_google_callback():
             display_name=user_info.get("name") or "",
         )
         return redirect(
-            "/?reply_mailbox=connected&provider=gmail&email="
+            "/reply_mailboxes/setup?reply_mailbox=connected&provider=gmail&email="
             + urllib.parse.quote(user_email)
         )
 
@@ -1470,7 +1470,7 @@ def auth_outlook_callback():
     if intent == "reply_mailbox":
         user_email = (info.get("email") or "").strip().lower()
         if not (refresh_token and user_email):
-            return redirect("/?reply_mailbox_error=missing_token_or_email")
+            return redirect("/reply_mailboxes/setup?reply_mailbox_error=missing_token_or_email")
         repdb.upsert_reply_mailbox(
             email=user_email,
             provider="outlook",
@@ -1481,7 +1481,7 @@ def auth_outlook_callback():
             display_name=info.get("name") or "",
         )
         return redirect(
-            "/?reply_mailbox=connected&provider=outlook&email="
+            "/reply_mailboxes/setup?reply_mailbox=connected&provider=outlook&email="
             + urllib.parse.quote(user_email)
         )
 
@@ -1501,6 +1501,16 @@ def _sf_callback_url() -> str:
     """Resolve the Salesforce OAuth callback URL the running app will use."""
     cfg = get_sf_oauth_config(session)
     return cfg["redirect_uri"] or (_public_base_url() + "/api/auth/salesforce/callback")
+
+
+@app.route("/reply_mailboxes/setup", methods=["GET"])
+def reply_mailboxes_setup():
+    """
+    Dedicated page to connect Gmail / Outlook accounts as test "contact" mailboxes.
+    Mirrors the Salesforce credentials page pattern so the main app UI stays clean —
+    the main page just links here with a single "Connect contact mailbox" button.
+    """
+    return render_template("reply_mailboxes_setup.html")
 
 
 @app.route("/salesforce/setup", methods=["GET", "POST"])
@@ -1792,19 +1802,73 @@ def get_reply_endpoint():
     if not send_row:
         return jsonify({"success": False, "error": "Original send not found"}), 404
 
-    mailbox = repdb.get_reply_mailbox(replier_email)
-    if not mailbox:
-        return jsonify({
-            "success": False,
-            "error": "Reply mailbox not connected — onboard it first via the Reply mailboxes panel.",
-            "needs_onboarding": True,
-            "email": replier_email,
-        }), 400
+    # Special case: when the chained replier IS the original sender of this
+    # conversation, they are already OAuth-connected via the regular Sender
+    # panel (token in Flask session). Avoid forcing them to also onboard
+    # themselves as a "reply mailbox" — just reuse the session token.
+    sender_email = (send_row.get("sender_email") or "").strip().lower()
+    is_self_reply = (replier_email == sender_email)
 
-    provider = (mailbox.get("provider") or "").lower()
-    refresh_token = mailbox.get("refresh_token") or ""
-    if not refresh_token:
-        return jsonify({"success": False, "error": "Stored refresh token is empty — reconnect this mailbox."}), 400
+    if is_self_reply:
+        sender_provider = (send_row.get("sender_provider") or "").lower()
+        if sender_provider == "gmail":
+            session_rt = session.get("google_refresh_token") or ""
+            session_email = (session.get("google_email") or "").strip().lower()
+            if not session_rt or session_email != sender_email:
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        "The original sender mailbox is not connected in this "
+                        "browser session. Click 'Connect Google' in the Sender "
+                        "panel as " + sender_email + " and try again."
+                    ),
+                }), 400
+            provider = "gmail"
+            refresh_token = session_rt
+            replier_display_name = (
+                session.get("google_name") or session.get("google_given_name") or ""
+            )
+        elif sender_provider == "outlook":
+            session_rt = session.get("microsoft_refresh_token") or ""
+            session_email = (session.get("outlook_email") or "").strip().lower()
+            if not session_rt or session_email != sender_email:
+                return jsonify({
+                    "success": False,
+                    "error": (
+                        "The original sender mailbox is not connected in this "
+                        "browser session. Click 'Connect Microsoft' in the "
+                        "Sender panel as " + sender_email + " and try again."
+                    ),
+                }), 400
+            provider = "outlook"
+            refresh_token = session_rt
+            replier_display_name = (
+                session.get("outlook_name") or session.get("outlook_given_name") or ""
+            )
+        else:
+            return jsonify({
+                "success": False,
+                "error": (
+                    "Chaining a reply from the original sender is only "
+                    "supported when the sender used Gmail or Outlook OAuth "
+                    "(not the SMTP path)."
+                ),
+            }), 400
+    else:
+        mailbox = repdb.get_reply_mailbox(replier_email)
+        if not mailbox:
+            return jsonify({
+                "success": False,
+                "error": "Reply mailbox not connected — onboard it first via the Reply mailboxes panel.",
+                "needs_onboarding": True,
+                "email": replier_email,
+            }), 400
+
+        provider = (mailbox.get("provider") or "").lower()
+        refresh_token = mailbox.get("refresh_token") or ""
+        replier_display_name = mailbox.get("display_name") or ""
+        if not refresh_token:
+            return jsonify({"success": False, "error": "Stored refresh token is empty — reconnect this mailbox."}), 400
 
     parent_row = None
     if parent_reply_id:
@@ -1828,7 +1892,7 @@ def get_reply_endpoint():
         original_body_plain=original_body,
         original_sender_email=original_sender_email,
         replier_email=replier_email,
-        replier_name=mailbox.get("display_name") or "",
+        replier_name=replier_display_name,
         intent=intent_key,
         mode=mode,
         tone_hint=tone_hint,
@@ -1927,7 +1991,7 @@ def get_reply_endpoint():
         status="sent" if success else "failed",
         error=error_text,
     )
-    if success:
+    if success and not is_self_reply:
         repdb.mark_reply_mailbox_used(replier_email)
 
     return jsonify({

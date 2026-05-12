@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect Contact Mailboxes · Reply Setup</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 30px 20px;
+        }
+        .container {
+            max-width: 760px;
+            margin: 0 auto;
+            background: #fff;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            padding: 32px 40px;
+        }
+        .header h1 { font-size: 26px; margin-bottom: 6px; }
+        .header p { opacity: 0.9; font-size: 14px; line-height: 1.5; }
+        .body { padding: 32px 40px; }
+
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #1976d2;
+            padding: 14px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            color: #0d3c61;
+            margin-bottom: 24px;
+            line-height: 1.55;
+        }
+
+        .section-title {
+            font-size: 15px;
+            font-weight: 700;
+            color: #333;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .mailbox-list {
+            background: #fafbff;
+            border: 1px solid #e6e8f0;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 24px;
+            min-height: 56px;
+        }
+        .mailbox-empty {
+            color: #888;
+            font-style: italic;
+            font-size: 14px;
+            padding: 6px 4px;
+        }
+        .reply-mailbox-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 12px;
+            background: #fff;
+            border-radius: 8px;
+            border: 1px solid #e2e6ee;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .reply-mailbox-row:last-child { margin-bottom: 0; }
+        .rmb-meta { color: #555; }
+        .rmb-provider {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-right: 8px;
+            text-transform: lowercase;
+        }
+        .rmb-provider.gmail { background: #ffe0b2; color: #b85f00; }
+        .rmb-provider.outlook { background: #cfd9ff; color: #1a3aa0; }
+        .rmb-delete {
+            background: #fff;
+            border: 1px solid #c8c8c8;
+            border-radius: 6px;
+            padding: 5px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            color: #555;
+        }
+        .rmb-delete:hover {
+            background: #fff5f5;
+            color: #c62828;
+            border-color: #c62828;
+        }
+
+        .connect-buttons {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            border: none;
+            padding: 13px 24px;
+            font-size: 15px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 8px 18px rgba(102, 126, 234, 0.3);
+        }
+        .btn-ghost {
+            background: #f5f5f5;
+            color: #333;
+        }
+        .btn-ghost:hover {
+            background: #ececec;
+            box-shadow: none;
+            transform: none;
+        }
+        .btn-gmail {
+            background: linear-gradient(135deg, #ea4335 0%, #fbbc05 100%);
+        }
+        .btn-outlook {
+            background: linear-gradient(135deg, #0078d4 0%, #005a9e 100%);
+        }
+
+        .footer-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 28px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+            flex-wrap: wrap;
+        }
+
+        .banner {
+            padding: 12px 14px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 18px;
+        }
+        .banner-success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border-left: 4px solid #2e7d32;
+        }
+        .banner-error {
+            background: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #c62828;
+        }
+
+        .help {
+            background: #fafafa;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 16px 18px;
+            margin-top: 24px;
+            font-size: 13px;
+            color: #555;
+            line-height: 1.6;
+        }
+        .help h3 { color: #333; font-size: 14px; margin-bottom: 8px; }
+        .help ol { padding-left: 20px; }
+        .help li { margin-bottom: 4px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📥 Connect Contact Mailboxes</h1>
+            <p>Authorize the Gmail / Outlook accounts you'll use as test "contacts". After sending an email, the <strong>Get reply</strong> button on each recipient row will fire a real AI-generated reply from that contact's mailbox back to the sender.</p>
+        </div>
+
+        <div class="body">
+            <div id="connectBanner"></div>
+
+            <div class="info-box">
+                Each account you connect here becomes a reachable test contact. The refresh token is stored securely in your Neon database so the app can send a reply on that contact's behalf when you click <strong>Get reply</strong>. You can disconnect any contact at any time.
+            </div>
+
+            <div class="section-title">🔗 Connected contact mailboxes</div>
+            <div class="mailbox-list" id="replyMailboxList">
+                <div class="mailbox-empty">Loading connected mailboxes…</div>
+            </div>
+
+            <div class="section-title">➕ Add a new contact mailbox</div>
+            <div class="connect-buttons">
+                <a href="/api/auth/reply_mailbox/google" class="btn btn-gmail">+ Connect contact Gmail</a>
+                <a href="/api/auth/reply_mailbox/outlook" class="btn btn-outlook">+ Connect contact Outlook</a>
+            </div>
+
+            <div class="help">
+                <h3>How this works</h3>
+                <ol>
+                    <li>Click <strong>Connect contact Gmail</strong> or <strong>Connect contact Outlook</strong> above.</li>
+                    <li>Sign in with the contact account and grant <em>send</em> &amp; <em>read</em> mail permissions.</li>
+                    <li>You'll return to this page once the OAuth flow completes; the new mailbox appears in the list above.</li>
+                    <li>Repeat for every test contact you want to be able to "reply" from.</li>
+                    <li>Go back to the main app and use <strong>Get reply</strong> on a recipient row to trigger a real inbound reply.</li>
+                </ol>
+            </div>
+
+            <div class="footer-actions">
+                <a href="/" class="btn btn-ghost">← Back to app</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function escapeHtml(s) {
+            return String(s == null ? '' : s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;');
+        }
+
+        function showBanner(kind, text) {
+            const el = document.getElementById('connectBanner');
+            if (!el) return;
+            el.innerHTML = '<div class="banner banner-' + kind + '">' + escapeHtml(text) + '</div>';
+        }
+
+        async function refreshList() {
+            const listEl = document.getElementById('replyMailboxList');
+            if (!listEl) return;
+            try {
+                const r = await fetch('/api/reply_mailboxes');
+                const j = await r.json();
+                if (!j.success) {
+                    listEl.innerHTML = '<div class="mailbox-empty" style="color:#c62828;">'
+                        + escapeHtml(j.error || 'Could not load mailboxes')
+                        + '</div>';
+                    return;
+                }
+                const mailboxes = j.mailboxes || [];
+                if (!mailboxes.length) {
+                    listEl.innerHTML = '<div class="mailbox-empty">No contact mailboxes connected yet. Use the buttons below to add one.</div>';
+                    return;
+                }
+                listEl.innerHTML = mailboxes.map(function (m) {
+                    const prov = (m.provider || '').toLowerCase();
+                    return '<div class="reply-mailbox-row">'
+                        + '<span>'
+                        +   '<span class="rmb-provider ' + escapeHtml(prov) + '">' + escapeHtml(prov || '?') + '</span>'
+                        +   '<strong>' + escapeHtml(m.email) + '</strong>'
+                        +   (m.display_name ? ' <span class="rmb-meta">— ' + escapeHtml(m.display_name) + '</span>' : '')
+                        + '</span>'
+                        + '<button type="button" class="rmb-delete" data-email="' + escapeHtml(m.email) + '">Forget</button>'
+                        + '</div>';
+                }).join('');
+                listEl.querySelectorAll('.rmb-delete').forEach(function (b) {
+                    b.addEventListener('click', async function () {
+                        if (!confirm('Forget reply mailbox ' + this.dataset.email + '? You can reconnect any time.')) return;
+                        await fetch('/api/reply_mailboxes/' + encodeURIComponent(this.dataset.email), { method: 'DELETE' });
+                        refreshList();
+                    });
+                });
+            } catch (err) {
+                listEl.innerHTML = '<div class="mailbox-empty" style="color:#c62828;">Failed to load: '
+                    + escapeHtml(err.message) + '</div>';
+            }
+        }
+
+        (function handleQuery() {
+            const qs = new URLSearchParams(window.location.search);
+            if (qs.get('reply_mailbox') === 'connected') {
+                showBanner('success', '✓ Connected: ' + (qs.get('email') || ''));
+                history.replaceState({}, document.title, '/reply_mailboxes/setup');
+            }
+            const err = qs.get('reply_mailbox_error');
+            if (err) {
+                showBanner('error', 'Connection failed (' + err + '). Try again or check server logs.');
+                history.replaceState({}, document.title, '/reply_mailboxes/setup');
+            }
+        })();
+
+        refreshList();
+    </script>
+</body>
+</html>

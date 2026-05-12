@@ -691,9 +691,8 @@
                     <div id="replyMailboxList" style="margin-bottom: 12px; font-size: 14px;">
                         <em style="color: #888;">Loading connected mailboxes…</em>
                     </div>
-                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                        <a href="/api/auth/reply_mailbox/google" class="btn" id="linkConnectReplyGmail" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 18px;">+ Connect contact Gmail</a>
-                        <a href="/api/auth/reply_mailbox/outlook" class="btn" id="linkConnectReplyOutlook" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 18px;">+ Connect contact Outlook</a>
+                    <div>
+                        <a href="/reply_mailboxes/setup" class="btn" id="linkManageReplyMailboxes" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 18px;">⚙️ Manage contact mailboxes</a>
                     </div>
                     <small id="replyMailboxHint" style="color: #888; display: block; margin-top: 10px;"></small>
                 </div>
@@ -899,8 +898,11 @@
                 }
                 if (hintEl) hintEl.textContent = '';
                 document.querySelectorAll('.btn-reply[data-email]').forEach(b => {
-                    const isConnected = !!getReplyMailbox(b.dataset.email);
                     if (b.dataset.replyState === 'sent') return;
+                    const email = (b.dataset.email || '').toLowerCase();
+                    const senderEmail = (b.dataset.senderEmail || '').toLowerCase();
+                    const isSelfSender = senderEmail && email === senderEmail;
+                    const isConnected = isSelfSender || !!getReplyMailbox(email);
                     b.disabled = !isConnected;
                     b.title = isConnected ? '' : 'Connect ' + b.dataset.email + ' as a reply mailbox first.';
                 });
@@ -994,7 +996,7 @@
                             '<span class="rcp-email">' + escapeHtml(rcp.email) + '</span>' +
                             buildIntentSelect(rowId) +
                             buildModeSelect(rowId) +
-                            '<button type="button" class="btn-reply" data-email="' + escapeHtml(rcp.email) + '" data-send-id="' + escapeHtml(email.send_id) + '" data-row-id="' + rowId + '">Get reply</button>' +
+                            '<button type="button" class="btn-reply" data-email="' + escapeHtml(rcp.email) + '" data-send-id="' + escapeHtml(email.send_id) + '" data-sender-email="' + escapeHtml(email.sender_email || '') + '" data-row-id="' + rowId + '">Get reply</button>' +
                             '<span class="reply-status" id="' + rowId + '-status" style="display:none;"></span>' +
                             '<div class="reply-chain" id="' + rowId + '-chain" style="width:100%;display:none;"></div>';
                         block.appendChild(row);
@@ -1010,11 +1012,13 @@
             scopeEl.querySelectorAll('button.btn-reply').forEach(b => {
                 if (b.dataset.bound === '1') return;
                 b.dataset.bound = '1';
-                const replierEmail = b.dataset.email;
+                const replierEmail = (b.dataset.email || '').toLowerCase();
+                const senderEmail = (b.dataset.senderEmail || '').toLowerCase();
+                const isSelfSender = senderEmail && replierEmail === senderEmail;
                 const mb = getReplyMailbox(replierEmail);
-                if (!mb) {
+                if (!mb && !isSelfSender) {
                     b.disabled = true;
-                    b.title = 'Connect ' + replierEmail + ' as a reply mailbox first.';
+                    b.title = 'Connect ' + b.dataset.email + ' as a reply mailbox first.';
                 }
                 b.addEventListener('click', () => handleGetReply(b));
             });
@@ -1145,6 +1149,8 @@
             childWrap.appendChild(wrap);
 
             const goBtn = wrap.querySelector('#' + pickerId + '-go');
+            const parentBtn = triggerBtn.closest('.recipient-row') ? triggerBtn.closest('.recipient-row').querySelector('button.btn-reply') : null;
+            const rootSenderEmail = (parentBtn && parentBtn.dataset.senderEmail) || '';
             goBtn.addEventListener('click', async () => {
                 const who = (wrap.querySelector('#' + pickerId + '-who') || {}).value || '__sender__';
                 let replier = who;
@@ -1157,6 +1163,7 @@
                 }
                 goBtn.dataset.sendId = sendId;
                 goBtn.dataset.email = replier;
+                goBtn.dataset.senderEmail = rootSenderEmail;
                 goBtn.dataset.rowId = pickerId;
                 goBtn.dataset.parentReplyId = parentReply.reply_id;
                 await handleGetReply(goBtn);
