@@ -126,6 +126,8 @@ def _do_send_email(
     plain_text: str,
     cc: list = None,
     bcc: list = None,
+    *,
+    send_id: Optional[str] = None,
 ):
     """Send a single email.
 
@@ -174,10 +176,17 @@ def _do_send_email(
         # first reply in two separate Gmail conversations).
         sender_host = from_addr.split("@", 1)[1].strip() if "@" in from_addr else None
         msg_id = generate_message_id(sender_host)
+        # X-Gptfy-Send-Id gives ``send_gmail`` a unique marker to fall back
+        # on when the post-send metadata read returns a stale/poisoned
+        # value (Gmail's index-vs-body race for Workspace senders writing
+        # into an existing thread). Without this marker the polling logic
+        # has no reliable way to disambiguate a bad read from a good one.
+        send_extra_headers = {"X-Gptfy-Send-Id": send_id} if send_id else None
         res = send_gmail(
             cid, cs, rt, from_addr, to_list, subject, plain_text, html_content,
             cc=cc, bcc=bcc,
             message_id=msg_id,
+            extra_headers=send_extra_headers,
         )
         if res.get("success"):
             meta["message_id"] = res.get("message_id") or msg_id
@@ -837,14 +846,15 @@ def send_emails():
                         ),
                     )
 
+                    send_id = secrets.token_urlsafe(12)
                     success, send_err, send_meta = _do_send_email(
                         send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
                         cc=cc_list, bcc=bcc_list,
+                        send_id=send_id,
                     )
 
-                    send_id = secrets.token_urlsafe(12)
                     if success:
                         _persist_send_to_db(
                             send_id=send_id,
@@ -940,14 +950,15 @@ def send_emails():
                         ),
                     )
 
+                    send_id = secrets.token_urlsafe(12)
                     success, send_err, send_meta = _do_send_email(
                         send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
                         cc=cc_list, bcc=bcc_list,
+                        send_id=send_id,
                     )
 
-                    send_id = secrets.token_urlsafe(12)
                     if success:
                         _persist_send_to_db(
                             send_id=send_id,
@@ -1115,14 +1126,15 @@ def send_emails():
                         ),
                     )
 
+                    send_id = secrets.token_urlsafe(12)
                     success, send_err, send_meta = _do_send_email(
                         send_method, agent, to_list,
                         email_content['subject'], email_content['html_content'],
                         email_content.get('plain_text') or '',
                         cc=cc_list, bcc=bcc_list,
+                        send_id=send_id,
                     )
 
-                    send_id = secrets.token_urlsafe(12)
                     if success:
                         _persist_send_to_db(
                             send_id=send_id,

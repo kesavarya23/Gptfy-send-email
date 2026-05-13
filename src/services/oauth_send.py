@@ -258,16 +258,50 @@ def send_gmail(
         # confirm the thread chain landed correctly without a Show-Original
         # round-trip in Gmail.
         if resp.get("id"):
+            # Build the "values that would mean we read the WRONG message
+            # back" set. Gmail has a documented stale-read race when a
+            # ``messages.get`` lands immediately after a ``messages.send``
+            # into an existing thread: the metadata index can briefly serve
+            # the PARENT's headers under the new message's id. The only
+            # reliable way to detect that case from here is to notice that
+            # the returned Message-Id collides with a value the caller
+            # already knew about (the In-Reply-To target, or anything the
+            # References chain quotes) — those are guaranteed to be NOT
+            # this new message's Message-Id.
+            poison_mids = set()
+            if in_reply_to:
+                poison_mids.add(in_reply_to.strip())
+            if references:
+                for tok in str(references).split():
+                    tok = tok.strip()
+                    if tok:
+                        poison_mids.add(tok)
+
+            # Marker we'll use as a last-resort lookup if the indexed read
+            # keeps returning a stale/poisoned value. Pulled from
+            # ``extra_headers`` so the caller stays in control of which
+            # custom header carries the unique id.
+            marker_header_name = ""
+            marker_header_value = ""
+            for k, v in (extra_headers or {}).items():
+                if not k or not v:
+                    continue
+                if k.lower().startswith("x-gptfy-"):
+                    marker_header_name = k
+                    marker_header_value = str(v)
+                    break
+
             final_mid = ""
             final_irt = ""
             final_refs = ""
-            # Backoff schedule — tuned for the ~1-2s Workspace rewrite
-            # window observed in practice. Total worst-case added latency
-            # is ~3s, which is acceptable for a one-off send.
-            delays = (0.0, 0.6, 1.0, 1.4)
-            for delay in delays:
-                if delay:
-                    time.sleep(delay)
+
+            # Schedule starts with a non-zero wait: Workspace's Sent-folder
+            # commit is not instant, and on a thread append the metadata
+            # index races the body. 0.8s is enough to clear the race in
+            # practice while keeping the worst-case latency bounded.
+            delays = (0.8, 1.0, 1.4, 2.0)
+            for attempt, delay in enumerate(delays):
+                time.sleep(delay)
                 try:
                     msg_meta = (
                         service.users()
@@ -275,22 +309,22 @@ def send_gmail(
                         .get(
                             userId="me",
                             id=resp["id"],
-                            format="metadata",
-                            metadataHeaders=[
-                                "Message-Id",
-                                "In-Reply-To",
-                                "References",
-                            ],
+                            # ``full`` bypasses the metadata-only cache that
+                            # caused the poisoned read above; we still only
+                            # look at headers, so the extra payload bytes
+                            # are negligible.
+                            format="full",
                         )
                         .execute()
                         or {}
                     )
                 except Exception as poll_err:  # noqa: BLE001
                     logger.warning(
-                        "Gmail message metadata read failed (attempt delay=%ss): %s",
-                        delay, poll_err,
+                        "Gmail message read failed (attempt=%d delay=%ss): %s",
+                        attempt, delay, poll_err,
                     )
                     continue
+
                 cur_mid = ""
                 cur_irt = ""
                 cur_refs = ""
@@ -303,31 +337,119 @@ def send_gmail(
                         cur_irt = value
                     elif name == "references":
                         cur_refs = value
+
+                # Reject the read if it collides with a known parent — that
+                # means we hit the stale-read race and need to wait longer.
+                if cur_mid and cur_mid.strip() in poison_mids:
+                    logger.warning(
+                        "Gmail returned stale parent headers for new message "
+                        "(attempt=%d, message_id=%s collides with In-Reply-To/References) — retrying",
+                        attempt, cur_mid,
+                    )
+                    continue
+
                 if cur_mid:
                     final_mid = cur_mid
                 if cur_irt:
                     final_irt = cur_irt
                 if cur_refs:
                     final_refs = cur_refs
+
                 # Gmail's authoritative final form always uses the
-                # ``@mail.gmail.com`` host. As soon as we see that we know
+                # ``@mail.gmail.com`` host. As soon as we see that AND it
+                # doesn't collide with anything in the chain, we know
                 # no more rewrites are coming and we can stop polling.
                 if final_mid and "@mail.gmail.com" in final_mid.lower():
                     break
-            if final_mid:
+
+            # Last-resort fallback: if the indexed read kept giving us a
+            # poisoned value, look the message up via our unique marker
+            # header. ``messages.list`` with a full-text query for the
+            # marker value will find the just-sent message regardless of
+            # which read replica answers, then a fresh ``messages.get``
+            # against THAT id returns the correct headers.
+            if (not final_mid or final_mid.strip() in poison_mids) and marker_header_value:
+                try:
+                    list_resp = (
+                        service.users()
+                        .messages()
+                        .list(
+                            userId="me",
+                            q=f'"{marker_header_value}" newer_than:1h',
+                            maxResults=3,
+                        )
+                        .execute()
+                        or {}
+                    )
+                    for cand in list_resp.get("messages") or []:
+                        cand_id = cand.get("id") or ""
+                        if not cand_id or cand_id == resp["id"]:
+                            # Skip the poisoned-id read entirely; only
+                            # trust matches from a different gmail-id
+                            # because that proves the marker resolved to
+                            # the right MIME body, not the racing index.
+                            if cand_id == resp["id"]:
+                                continue
+                        try:
+                            cand_meta = (
+                                service.users()
+                                .messages()
+                                .get(userId="me", id=cand_id, format="full")
+                                .execute()
+                                or {}
+                            )
+                        except Exception:  # noqa: BLE001
+                            continue
+                        cand_mid = ""
+                        cand_marker = ""
+                        for h in (cand_meta.get("payload") or {}).get("headers") or []:
+                            n = (h.get("name") or "").lower()
+                            v = h.get("value") or ""
+                            if n == "message-id":
+                                cand_mid = v
+                            elif n == marker_header_name.lower():
+                                cand_marker = v
+                        if cand_marker == marker_header_value and cand_mid \
+                                and cand_mid.strip() not in poison_mids:
+                            final_mid = cand_mid
+                            logger.info(
+                                "Recovered final Message-Id via marker fallback: %s",
+                                final_mid,
+                            )
+                            break
+                except Exception as marker_err:  # noqa: BLE001
+                    logger.warning(
+                        "Marker-based recovery failed: %s", marker_err,
+                    )
+
+            if final_mid and final_mid.strip() not in poison_mids:
                 result["message_id"] = final_mid
+            else:
+                # Refuse to store a known-bad value. Better to leave the
+                # field empty so the caller surfaces the failure than to
+                # poison the DB and silently break threading downstream.
+                logger.error(
+                    "Could not capture a unique Message-Id for Gmail send "
+                    "(polled=%s, poison=%s). Caller will see empty message_id.",
+                    final_mid, sorted(poison_mids),
+                )
+                result["message_id"] = ""
+                result["error"] = (
+                    "Gmail returned poisoned/parent Message-Id for the new "
+                    "message after polling+marker fallback — see logs."
+                )
             result["in_reply_to"] = final_irt
             result["references"] = final_refs
             logger.info(
                 "Gmail send finalised: from=%s message_id=%s in_reply_to=%s references=%s",
-                from_addr, final_mid, final_irt, final_refs,
+                from_addr, result["message_id"], final_irt, final_refs,
             )
-            if final_mid and "@mail.gmail.com" not in final_mid.lower():
+            if result["message_id"] and "@mail.gmail.com" not in result["message_id"].lower():
                 logger.warning(
                     "Gmail did not rewrite Message-Id to @mail.gmail.com after polling "
                     "(value=%s). Threading on inbound replies may break — investigate "
                     "Workspace DKIM / outbound relay config.",
-                    final_mid,
+                    result["message_id"],
                 )
         return result
     except Exception as e:  # noqa: BLE001
