@@ -162,10 +162,11 @@ def send_gmail(
 ) -> Dict[str, Any]:
     """Send a message via the Gmail API.
 
-    Returns a dict ``{"success", "message_id", "thread_id", "error"}`` so the
-    caller can persist the threading metadata. ``message_id`` is the RFC
-    Message-ID header value (which we set explicitly when ``message_id`` is
-    passed so the reply-testing flow can quote it back in ``In-Reply-To``).
+    Returns a dict ``{"success", "message_id", "thread_id", "in_reply_to",
+    "references", "error"}`` so the caller can persist the threading
+    metadata and verify the chain landed correctly. ``message_id`` is the
+    *final* RFC Message-ID Gmail assigned (not the one we proposed) — see
+    the polling logic below for why this matters for Workspace senders.
 
     When ``thread_id`` is supplied the API will append the message to that
     Gmail conversation; useful for reply-to-reply chains where the contact's
@@ -179,6 +180,8 @@ def send_gmail(
         "success": False,
         "message_id": message_id or "",
         "thread_id": "",
+        "in_reply_to": "",
+        "references": "",
         "error": "",
     }
 
@@ -238,34 +241,94 @@ def send_gmail(
         result["success"] = True
         result["thread_id"] = resp.get("threadId", "") or ""
         # ALWAYS read the actual Message-Id back from Gmail — even when we
-        # pre-set it ourselves. Gmail (or the next hop) sometimes rewrites
-        # the header when the host part doesn't match the sender's domain,
-        # and a stale value here silently breaks ``In-Reply-To`` threading
-        # for every subsequent reply (the recipient inbox can't find the
-        # message we're claiming to reply to). The actual sent value is the
-        # one recipient mailboxes use for matching, so that's what we store.
+        # pre-set it ourselves. Gmail rewrites the Message-Id of every
+        # outbound message to its own ``@mail.gmail.com`` form. For regular
+        # ``@gmail.com`` senders the rewrite happens BEFORE our read-back,
+        # so a single ``messages.get`` is enough. For Google Workspace
+        # senders (custom domains) the rewrite is deferred behind DKIM
+        # signing / relay processing — an immediate read-back returns the
+        # transient pre-rewrite value, which then becomes stale a moment
+        # later. A stale ``message_id`` silently breaks ``In-Reply-To``
+        # threading on every subsequent reply (recipient mailboxes look up
+        # the value we claim and can't find it).
+        #
+        # We therefore POLL ``messages.get`` until the value stabilises in
+        # Gmail's final ``@mail.gmail.com`` form (or we exhaust the budget).
+        # We also capture ``In-Reply-To`` / ``References`` so the caller can
+        # confirm the thread chain landed correctly without a Show-Original
+        # round-trip in Gmail.
         if resp.get("id"):
-            try:
-                msg_meta = (
-                    service.users()
-                    .messages()
-                    .get(
-                        userId="me",
-                        id=resp["id"],
-                        format="metadata",
-                        metadataHeaders=["Message-Id"],
+            final_mid = ""
+            final_irt = ""
+            final_refs = ""
+            # Backoff schedule — tuned for the ~1-2s Workspace rewrite
+            # window observed in practice. Total worst-case added latency
+            # is ~3s, which is acceptable for a one-off send.
+            delays = (0.0, 0.6, 1.0, 1.4)
+            for delay in delays:
+                if delay:
+                    time.sleep(delay)
+                try:
+                    msg_meta = (
+                        service.users()
+                        .messages()
+                        .get(
+                            userId="me",
+                            id=resp["id"],
+                            format="metadata",
+                            metadataHeaders=[
+                                "Message-Id",
+                                "In-Reply-To",
+                                "References",
+                            ],
+                        )
+                        .execute()
+                        or {}
                     )
-                    .execute()
-                    or {}
-                )
+                except Exception as poll_err:  # noqa: BLE001
+                    logger.warning(
+                        "Gmail message metadata read failed (attempt delay=%ss): %s",
+                        delay, poll_err,
+                    )
+                    continue
+                cur_mid = ""
+                cur_irt = ""
+                cur_refs = ""
                 for h in (msg_meta.get("payload") or {}).get("headers") or []:
-                    if (h.get("name") or "").lower() == "message-id":
-                        actual_mid = h.get("value") or ""
-                        if actual_mid:
-                            result["message_id"] = actual_mid
-                        break
-            except Exception:  # noqa: BLE001
-                pass
+                    name = (h.get("name") or "").lower()
+                    value = h.get("value") or ""
+                    if name == "message-id":
+                        cur_mid = value
+                    elif name == "in-reply-to":
+                        cur_irt = value
+                    elif name == "references":
+                        cur_refs = value
+                if cur_mid:
+                    final_mid = cur_mid
+                if cur_irt:
+                    final_irt = cur_irt
+                if cur_refs:
+                    final_refs = cur_refs
+                # Gmail's authoritative final form always uses the
+                # ``@mail.gmail.com`` host. As soon as we see that we know
+                # no more rewrites are coming and we can stop polling.
+                if final_mid and "@mail.gmail.com" in final_mid.lower():
+                    break
+            if final_mid:
+                result["message_id"] = final_mid
+            result["in_reply_to"] = final_irt
+            result["references"] = final_refs
+            logger.info(
+                "Gmail send finalised: from=%s message_id=%s in_reply_to=%s references=%s",
+                from_addr, final_mid, final_irt, final_refs,
+            )
+            if final_mid and "@mail.gmail.com" not in final_mid.lower():
+                logger.warning(
+                    "Gmail did not rewrite Message-Id to @mail.gmail.com after polling "
+                    "(value=%s). Threading on inbound replies may break — investigate "
+                    "Workspace DKIM / outbound relay config.",
+                    final_mid,
+                )
         return result
     except Exception as e:  # noqa: BLE001
         logger.error("Gmail send failed: %s", e)
@@ -657,19 +720,7 @@ def find_gmail_thread_id_by_message_id(
     if not rfc_message_id:
         return "", ""
     try:
-        from google.oauth2.credentials import Credentials
-        from google.auth.transport.requests import Request
-        from googleapiclient.discovery import build
-
-        creds = Credentials(
-            token=None,
-            refresh_token=refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=client_id,
-            client_secret=client_secret,
-        )
-        creds.refresh(Request())
-        service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+        service = _build_gmail_service(client_id, client_secret, refresh_token)
         bare = rfc_message_id.strip().lstrip("<").rstrip(">")
         query = f"rfc822msgid:{bare}"
         resp = (
@@ -687,5 +738,141 @@ def find_gmail_thread_id_by_message_id(
     except Exception as e:  # noqa: BLE001
         logger.warning("Gmail thread lookup failed: %s", e)
         return "", ""
+
+
+def _build_gmail_service(client_id: str, client_secret: str, refresh_token: str):
+    """Build an authenticated Gmail API client (refreshing the token first)."""
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+
+    creds = Credentials(
+        token=None,
+        refresh_token=refresh_token,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=client_id,
+        client_secret=client_secret,
+    )
+    creds.refresh(Request())
+    return build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+
+def locate_gmail_message_for_reply(
+    client_id: str,
+    client_secret: str,
+    refresh_token: str,
+    *,
+    rfc_message_id: str,
+    sender_email: str = "",
+    subject: str = "",
+) -> Dict[str, str]:
+    """Self-healing lookup for the parent message in a contact's Gmail.
+
+    Returns ``{"gmail_id", "thread_id", "actual_message_id"}``.
+
+    Order of attempts:
+      1. ``rfc822msgid:`` for the stored Message-Id (fast, exact).
+      2. ``from:<sender> subject:"<subject>" newer_than:30d`` fallback —
+         needed when the stored Message-Id is stale because Gmail did a
+         delayed rewrite to its ``@mail.gmail.com`` form on the original
+         send (a Workspace-sender quirk we can't avoid; we patch it on the
+         send path going forward, but this fallback rescues older rows).
+
+    ``actual_message_id`` is the Message-Id Gmail currently has on the
+    located copy — caller should backfill any stale DB row with this value
+    so future lookups are O(1) again.
+    """
+    out = {"gmail_id": "", "thread_id": "", "actual_message_id": ""}
+    if not refresh_token:
+        return out
+    try:
+        service = _build_gmail_service(client_id, client_secret, refresh_token)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Gmail service build failed: %s", e)
+        return out
+
+    candidate_id = ""
+    candidate_thread = ""
+
+    if rfc_message_id:
+        bare = rfc_message_id.strip().lstrip("<").rstrip(">")
+        try:
+            resp = (
+                service.users()
+                .messages()
+                .list(userId="me", q=f"rfc822msgid:{bare}", maxResults=1)
+                .execute()
+                or {}
+            )
+            msgs = resp.get("messages") or []
+            if msgs:
+                candidate_id = msgs[0].get("id") or ""
+                candidate_thread = msgs[0].get("threadId") or ""
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Gmail rfc822msgid lookup failed: %s", e)
+
+    if not candidate_id and (sender_email or subject):
+        # Quote the subject so spaces / colons don't get split into
+        # separate Gmail search terms. Strip Re:/Fwd: so we match the
+        # original even when our caller passed the reply subject.
+        clean_subject = (subject or "").strip()
+        for prefix in ("re:", "fwd:", "fw:"):
+            while clean_subject.lower().startswith(prefix):
+                clean_subject = clean_subject[len(prefix):].lstrip()
+        parts = []
+        if sender_email:
+            parts.append(f"from:{sender_email}")
+        if clean_subject:
+            escaped = clean_subject.replace('"', "")
+            parts.append(f'subject:"{escaped}"')
+        parts.append("newer_than:30d")
+        q = " ".join(parts)
+        try:
+            resp = (
+                service.users()
+                .messages()
+                .list(userId="me", q=q, maxResults=5)
+                .execute()
+                or {}
+            )
+            msgs = resp.get("messages") or []
+            if msgs:
+                # Prefer the oldest matching message — that's the original,
+                # not a later reply that happens to share the subject.
+                candidate_id = (msgs[-1] or {}).get("id") or ""
+                candidate_thread = (msgs[-1] or {}).get("threadId") or ""
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Gmail subject/sender fallback lookup failed: %s", e)
+
+    if not candidate_id:
+        return out
+
+    out["gmail_id"] = candidate_id
+    out["thread_id"] = candidate_thread
+
+    # Read the *current* Message-Id of the located copy. This is the value
+    # the recipient mailbox actually has, and therefore the value we MUST
+    # quote in In-Reply-To / References for threading to work.
+    try:
+        meta = (
+            service.users()
+            .messages()
+            .get(
+                userId="me",
+                id=candidate_id,
+                format="metadata",
+                metadataHeaders=["Message-Id"],
+            )
+            .execute()
+            or {}
+        )
+        for h in (meta.get("payload") or {}).get("headers") or []:
+            if (h.get("name") or "").lower() == "message-id":
+                out["actual_message_id"] = h.get("value") or ""
+                break
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Gmail message metadata read for backfill failed: %s", e)
+
+    return out
 
 

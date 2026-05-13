@@ -232,6 +232,45 @@ def record_send(
         return False
 
 
+def update_send_message_id(send_id: str, new_message_id: str) -> bool:
+    """Repair a stale ``message_id`` discovered by the self-healing lookup.
+
+    Used when a reply to an old send finds that the contact's mailbox has a
+    different Message-Id than the one we stored at send time (Gmail's
+    delayed Workspace rewrite). Persisting the corrected value here means
+    every subsequent reply to the same send is O(1) again instead of
+    falling through to the subject/sender fallback.
+    """
+    if not is_db_enabled() or not (send_id and new_message_id):
+        return False
+    try:
+        with _conn() as c, c.cursor() as cur:
+            cur.execute(
+                "UPDATE sends SET message_id = %s WHERE send_id = %s",
+                (new_message_id, send_id),
+            )
+            return (cur.rowcount or 0) > 0
+    except Exception as e:  # noqa: BLE001
+        logger.error("update_send_message_id failed: %s", e)
+        return False
+
+
+def update_reply_message_id(reply_id: str, new_message_id: str) -> bool:
+    """Same self-heal as ``update_send_message_id`` but for chained replies."""
+    if not is_db_enabled() or not (reply_id and new_message_id):
+        return False
+    try:
+        with _conn() as c, c.cursor() as cur:
+            cur.execute(
+                "UPDATE replies SET message_id = %s WHERE reply_id = %s",
+                (new_message_id, reply_id),
+            )
+            return (cur.rowcount or 0) > 0
+    except Exception as e:  # noqa: BLE001
+        logger.error("update_reply_message_id failed: %s", e)
+        return False
+
+
 def get_send(send_id: str) -> Optional[Dict[str, Any]]:
     """Return the full send record + recipients, or ``None`` if not found."""
     if not is_db_enabled() or not send_id:

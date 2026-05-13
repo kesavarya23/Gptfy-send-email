@@ -38,6 +38,7 @@ from services.oauth_send import (
     get_google_user_info,
     get_microsoft_access_token,
     get_microsoft_user_info,
+    locate_gmail_message_for_reply,
     reply_outlook,
     send_gmail,
     send_outlook,
@@ -2051,11 +2052,53 @@ def get_reply_endpoint():
         if not (cid and cs):
             return jsonify({"success": False, "error": "Google OAuth client is not configured on the server"}), 503
 
+        # Self-healing parent lookup in the REPLIER's mailbox. We need two
+        # things: the replier's threadId (to thread the reply in the
+        # replier's Sent folder) and the *actual* current Message-Id of
+        # the parent (to put in In-Reply-To / References so the original
+        # sender's mailbox threads it on receipt).
+        #
+        # The previous code only used `find_gmail_thread_id_by_message_id`
+        # with the stored Message-Id, which silently fails for any send
+        # that suffered Gmail's delayed Workspace rewrite — leaving every
+        # subsequent reply with a stale In-Reply-To value that no mailbox
+        # could match. The locator below falls back to subject+sender
+        # search to repair those rows on the fly, then patches the DB so
+        # future replies are O(1) again.
         thread_id = ""
-        if in_reply_to_id:
-            _, thread_id = find_gmail_thread_id_by_message_id(
-                cid, cs, refresh_token, in_reply_to_id
+        parent_subject_for_lookup = (
+            (parent_row.get("subject") if parent_row else send_row.get("subject")) or ""
+        )
+        parent_sender_for_lookup = (
+            (parent_row.get("replier_email") if parent_row else send_row.get("sender_email")) or ""
+        )
+        located = locate_gmail_message_for_reply(
+            cid, cs, refresh_token,
+            rfc_message_id=in_reply_to_id,
+            sender_email=parent_sender_for_lookup,
+            subject=parent_subject_for_lookup,
+        )
+        thread_id = located.get("thread_id", "") or ""
+        actual_parent_mid = located.get("actual_message_id", "") or ""
+        if actual_parent_mid and actual_parent_mid != in_reply_to_id:
+            logger.info(
+                "Self-healing stale Message-Id for reply parent: stored=%s actual=%s",
+                in_reply_to_id, actual_parent_mid,
             )
+            if parent_row:
+                repdb.update_reply_message_id(
+                    parent_row.get("reply_id") or "", actual_parent_mid
+                )
+            else:
+                repdb.update_send_message_id(send_id, actual_parent_mid)
+            in_reply_to_id = actual_parent_mid
+            # Rebuild the References chain after the parent's Message-Id
+            # was corrected so we don't quote the stale value upstream.
+            if parent_row:
+                parent_row["message_id"] = actual_parent_mid
+            else:
+                send_row["message_id"] = actual_parent_mid
+            references_header = _build_references_chain(send_row, parent_row)
 
         plain_for_send = reply_body
         html_for_send = _plain_text_to_minimal_html(plain_for_send)
