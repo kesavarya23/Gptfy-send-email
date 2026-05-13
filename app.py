@@ -2064,20 +2064,31 @@ def get_reply_endpoint():
         if not (cid and cs):
             return jsonify({"success": False, "error": "Google OAuth client is not configured on the server"}), 503
 
-        # Self-healing parent lookup in the REPLIER's mailbox. We need two
-        # things: the replier's threadId (to thread the reply in the
-        # replier's Sent folder) and the *actual* current Message-Id of
-        # the parent (to put in In-Reply-To / References so the original
-        # sender's mailbox threads it on receipt).
-        #
-        # The previous code only used `find_gmail_thread_id_by_message_id`
-        # with the stored Message-Id, which silently fails for any send
-        # that suffered Gmail's delayed Workspace rewrite — leaving every
-        # subsequent reply with a stale In-Reply-To value that no mailbox
-        # could match. The locator below falls back to subject+sender
-        # search to repair those rows on the fly, then patches the DB so
-        # future replies are O(1) again.
         thread_id = ""
+        actual_parent_mid = ""
+
+        # FAST PATH for self-reply (A replying inside their own thread):
+        # we already stored A's threadId on the original send, so we can
+        # pass it through to Gmail directly. This sidesteps the locator's
+        # dependency on Gmail's mailbox index, which has a multi-second
+        # commit lag on a freshly received reply — when locator misses,
+        # Gmail's send rejects our (missing) threadId and creates a new
+        # thread, which is exactly the "2nd email from sender starts a
+        # new thread" symptom we kept reproducing for Workspace senders.
+        if is_self_reply and (send_row.get("thread_id") or ""):
+            thread_id = send_row.get("thread_id") or ""
+            logger.info(
+                "Using sends.thread_id directly for self-reply: %s", thread_id,
+            )
+
+        # Self-healing parent lookup in the REPLIER's mailbox. Returns
+        # (a) the thread_id we should append to (only used when we don't
+        # already have one from the fast path above), and (b) the actual
+        # current Message-Id of the parent — needed for In-Reply-To /
+        # References so the original sender's mailbox threads inbound
+        # replies on receipt. The locator falls back to subject+sender
+        # search to repair stale rows on the fly, then patches the DB
+        # so future replies are O(1) again.
         parent_subject_for_lookup = (
             (parent_row.get("subject") if parent_row else send_row.get("subject")) or ""
         )
@@ -2090,7 +2101,8 @@ def get_reply_endpoint():
             sender_email=parent_sender_for_lookup,
             subject=parent_subject_for_lookup,
         )
-        thread_id = located.get("thread_id", "") or ""
+        if not thread_id:
+            thread_id = located.get("thread_id", "") or ""
         actual_parent_mid = located.get("actual_message_id", "") or ""
         if actual_parent_mid and actual_parent_mid != in_reply_to_id:
             logger.info(

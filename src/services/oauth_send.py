@@ -365,9 +365,11 @@ def send_gmail(
             # Last-resort fallback: if the indexed read kept giving us a
             # poisoned value, look the message up via our unique marker
             # header. ``messages.list`` with a full-text query for the
-            # marker value will find the just-sent message regardless of
-            # which read replica answers, then a fresh ``messages.get``
-            # against THAT id returns the correct headers.
+            # marker value will find the just-sent message even when the
+            # metadata index is still serving the parent's headers under
+            # the same id. We then re-fetch with ``format='raw'`` (which
+            # returns the raw RFC822 bytes) to BYPASS Gmail's metadata
+            # cache entirely and parse the real Message-Id ourselves.
             if (not final_mid or final_mid.strip() in poison_mids) and marker_header_value:
                 try:
                     list_resp = (
@@ -376,44 +378,65 @@ def send_gmail(
                         .list(
                             userId="me",
                             q=f'"{marker_header_value}" newer_than:1h',
-                            maxResults=3,
+                            maxResults=5,
                         )
                         .execute()
                         or {}
                     )
-                    for cand in list_resp.get("messages") or []:
-                        cand_id = cand.get("id") or ""
-                        if not cand_id or cand_id == resp["id"]:
-                            # Skip the poisoned-id read entirely; only
-                            # trust matches from a different gmail-id
-                            # because that proves the marker resolved to
-                            # the right MIME body, not the racing index.
-                            if cand_id == resp["id"]:
-                                continue
+                    candidates = [
+                        (c.get("id") or "")
+                        for c in (list_resp.get("messages") or [])
+                        if c.get("id")
+                    ]
+                    # Always include resp["id"] as a candidate too — the
+                    # marker query can race against indexing. Re-reading
+                    # it with format=raw can still recover the right
+                    # headers even when format=metadata is poisoned.
+                    if resp.get("id") and resp["id"] not in candidates:
+                        candidates.insert(0, resp["id"])
+
+                    for cand_id in candidates:
+                        # A small extra wait between candidate reads —
+                        # buys time for Workspace's DKIM-rewrite pipeline
+                        # to finalise the Sent folder copy. Cumulative
+                        # cap is bounded by ``maxResults * 0.5s``.
+                        time.sleep(0.5)
                         try:
-                            cand_meta = (
+                            cand_raw = (
                                 service.users()
                                 .messages()
-                                .get(userId="me", id=cand_id, format="full")
+                                .get(userId="me", id=cand_id, format="raw")
                                 .execute()
                                 or {}
                             )
                         except Exception:  # noqa: BLE001
                             continue
-                        cand_mid = ""
-                        cand_marker = ""
-                        for h in (cand_meta.get("payload") or {}).get("headers") or []:
-                            n = (h.get("name") or "").lower()
-                            v = h.get("value") or ""
-                            if n == "message-id":
-                                cand_mid = v
-                            elif n == marker_header_name.lower():
-                                cand_marker = v
+                        raw_b64 = cand_raw.get("raw") or ""
+                        if not raw_b64:
+                            continue
+                        try:
+                            raw_bytes = base64.urlsafe_b64decode(raw_b64.encode("utf-8"))
+                            from email import message_from_bytes
+                            parsed = message_from_bytes(raw_bytes)
+                        except Exception:  # noqa: BLE001
+                            continue
+                        cand_mid = (parsed.get("Message-Id") or "").strip()
+                        cand_marker = (parsed.get(marker_header_name) or "").strip()
+                        # Only trust candidates that also carry our
+                        # marker (so we know we're looking at OUR
+                        # message, not an older one in the same thread)
+                        # and whose Message-Id isn't in the poison set.
                         if cand_marker == marker_header_value and cand_mid \
-                                and cand_mid.strip() not in poison_mids:
+                                and cand_mid not in poison_mids:
                             final_mid = cand_mid
+                            cand_irt = (parsed.get("In-Reply-To") or "").strip()
+                            cand_refs = (parsed.get("References") or "").strip()
+                            if cand_irt:
+                                final_irt = cand_irt
+                            if cand_refs:
+                                final_refs = cand_refs
                             logger.info(
-                                "Recovered final Message-Id via marker fallback: %s",
+                                "Recovered final Message-Id via marker+raw fallback: %s",
                                 final_mid,
                             )
                             break
