@@ -440,6 +440,24 @@
             color: #333;
             border: 1px solid #ccc;
         }
+        .recipient-row .custom-reply-body {
+            width: 100%;
+            min-height: 84px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            border: 1px solid #c8c8c8;
+            font-size: 13px;
+            font-family: inherit;
+            resize: vertical;
+            box-sizing: border-box;
+            margin-top: 4px;
+            background: #fff;
+        }
+        .recipient-row .custom-reply-body:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102,126,234,0.18);
+        }
         .reply-status {
             font-size: 12px;
             margin-left: 6px;
@@ -642,7 +660,7 @@
                         <div class="segment-control segment-control-wide">
                             <button type="button" class="segment-option" data-send="gmail" id="segGmail">Gmail (OAuth)<span class="seg-check" id="segCheckGmail" style="display:none; color:#2e7d32; font-weight:700;"> ✓</span></button>
                             <button type="button" class="segment-option" data-send="outlook" id="segOutlook">Outlook (OAuth)<span class="seg-check" id="segCheckOutlook" style="display:none; color:#2e7d32; font-weight:700;"> ✓</span></button>
-                            <button type="button" class="segment-option active" data-send="smtp" id="segSmtp">SMTP (password)</button>
+                            <button type="button" class="segment-option" data-send="smtp" id="segSmtp">SMTP (password)</button>
                         </div>
                         <small style="color: #666; font-size: 12px; display: block; margin-top: 6px;">A ✓ means that provider is already signed in. Click the segment to pick which account actually sends — switching here does <strong>not</strong> disconnect the other one.</small>
                     </div>
@@ -662,7 +680,7 @@
                         <a href="/api/auth/outlook" class="btn" id="linkConnectOutlook" style="display: inline-block; text-align: center; text-decoration: none; width: auto; padding: 10px 20px; margin-right: 8px;">Connect Microsoft</a>
                         <button type="button" class="btn" id="btnDisconnectOutlook" style="display: none; width: auto; padding: 10px 20px; background: #666;">Disconnect</button>
                     </div>
-                    <div id="panelSmtp" class="sender-panel">
+                    <div id="panelSmtp" class="sender-panel" style="display: none;">
                         <div class="info-box" style="margin-bottom: 16px;">
                             <p><strong>📧 Gmail Users:</strong> Use App Password, not regular password</p>
                             <p><strong>🔗 Get App Password:</strong> <a href="https://myaccount.google.com/apppasswords" target="_blank">myaccount.google.com/apppasswords</a></p>
@@ -837,16 +855,25 @@
     <script>
         let _lastAuthStatus = {};
         let _replyMailboxes = [];
+        // Track whether the page has already picked an initial send method
+        // (Gmail/Outlook/SMTP) and whether the human has manually clicked a
+        // segment. Once the user picks a segment, later auth-status refreshes
+        // must NOT silently switch their choice.
+        let _initialSendMethodApplied = false;
+        let _userPickedSendMethod = false;
 
         const REPLY_INTENTS = [
-            { value: 'asking',     label: 'Asking for details' },
-            { value: 'interested', label: 'Interested' },
-            { value: 'decline',    label: 'Polite decline' },
-            { value: 'forwarding', label: 'Forwarding internally' },
-            { value: 'ooo',        label: 'Out of office' },
-            { value: 'negotiation',label: 'Negotiation' },
-            { value: 'quick_yes',  label: 'Quick yes' },
-            { value: 'question',   label: 'Question on a fact' }
+            { value: 'asking',         label: 'Asking for details' },
+            { value: 'interested',     label: 'Interested' },
+            { value: 'acknowledgement',label: 'Acknowledgement' },
+            { value: 'thanks',         label: 'Thanks note' },
+            { value: 'decline',        label: 'Polite decline' },
+            { value: 'forwarding',     label: 'Forwarding internally' },
+            { value: 'ooo',            label: 'Out of office' },
+            { value: 'negotiation',    label: 'Negotiation' },
+            { value: 'quick_yes',      label: 'Quick yes' },
+            { value: 'question',       label: 'Question on a fact' },
+            { value: 'other',          label: 'Other (write your own)' }
         ];
 
         function escapeHtml(s) {
@@ -896,6 +923,33 @@
                 '<option value="reply">Reply</option>' +
                 '<option value="reply_all">Reply All</option>' +
                 '</select>';
+        }
+
+        function buildCustomBodyBox(idPrefix) {
+            return '<textarea class="custom-reply-body" id="' + idPrefix + '-custom" ' +
+                'placeholder="Write the reply you want to send from this mailbox..." ' +
+                'style="display:none;"></textarea>';
+        }
+
+        function wireIntentCustomToggle(scopeEl) {
+            scopeEl.querySelectorAll('select.intent-select').forEach(sel => {
+                if (sel.dataset.customBound === '1') return;
+                sel.dataset.customBound = '1';
+                const sync = () => {
+                    const id = sel.id || '';
+                    const rowId = id.replace(/-intent$/, '');
+                    const ta = document.getElementById(rowId + '-custom');
+                    if (!ta) return;
+                    if (sel.value === 'other') {
+                        ta.style.display = 'block';
+                        try { ta.focus({ preventScroll: true }); } catch (_) { ta.focus(); }
+                    } else {
+                        ta.style.display = 'none';
+                    }
+                };
+                sel.addEventListener('change', sync);
+                sync();
+            });
         }
 
         function getTypeClass(type) {
@@ -964,12 +1018,16 @@
                             buildModeSelect(rowId) +
                             '<button type="button" class="btn-reply" data-email="' + escapeHtml(rcp.email) + '" data-send-id="' + escapeHtml(email.send_id) + '" data-sender-email="' + escapeHtml(email.sender_email || '') + '" data-row-id="' + rowId + '">Get reply</button>' +
                             '<span class="reply-status" id="' + rowId + '-status" style="display:none;"></span>' +
+                            buildCustomBodyBox(rowId) +
                             '<div class="reply-chain" id="' + rowId + '-chain" style="width:100%;display:none;"></div>';
                         block.appendChild(row);
                     });
                 }
                 wrap.appendChild(block);
-                setTimeout(() => attachReplyButtonHandlers(block), 0);
+                setTimeout(() => {
+                    attachReplyButtonHandlers(block);
+                    wireIntentCustomToggle(block);
+                }, 0);
             }
             return wrap;
         }
@@ -999,12 +1057,29 @@
             const parentReplyId = btn.dataset.parentReplyId || '';
             const statusEl = document.getElementById(rowId + '-status');
             const chainEl = document.getElementById(rowId + '-chain');
+            const customEl = document.getElementById(rowId + '-custom');
+            const customBody = customEl ? (customEl.value || '').trim() : '';
+
+            if (intent === 'other' && !customBody) {
+                if (statusEl) {
+                    statusEl.style.display = 'inline';
+                    statusEl.className = 'reply-status failed';
+                    statusEl.textContent = '❌ Type the reply text in the box first.';
+                }
+                if (customEl) {
+                    customEl.style.display = 'block';
+                    try { customEl.focus({ preventScroll: true }); } catch (_) { customEl.focus(); }
+                }
+                return;
+            }
 
             btn.disabled = true;
             if (statusEl) {
                 statusEl.style.display = 'inline';
                 statusEl.className = 'reply-status pending';
-                statusEl.textContent = '⏳ Generating reply…';
+                statusEl.textContent = intent === 'other'
+                    ? '⏳ Sending your reply…'
+                    : '⏳ Generating reply…';
             }
 
             try {
@@ -1016,7 +1091,8 @@
                         replier_email: replierEmail,
                         mode: mode,
                         intent: intent,
-                        parent_reply_id: parentReplyId || undefined
+                        parent_reply_id: parentReplyId || undefined,
+                        custom_body: intent === 'other' ? customBody : undefined
                     })
                 });
                 const j = await r.json();
@@ -1111,8 +1187,10 @@
                 buildModeSelect(pickerId) +
                 '<button type="button" class="btn-reply" id="' + pickerId + '-go">Send chained reply</button>' +
                 '<span class="reply-status" id="' + pickerId + '-status" style="display:none;"></span>' +
+                buildCustomBodyBox(pickerId) +
                 '<div class="reply-chain" id="' + pickerId + '-chain" style="width:100%;display:none;"></div>';
             childWrap.appendChild(wrap);
+            wireIntentCustomToggle(wrap);
 
             const goBtn = wrap.querySelector('#' + pickerId + '-go');
             const parentBtn = triggerBtn.closest('.recipient-row') ? triggerBtn.closest('.recipient-row').querySelector('button.btn-reply') : null;
@@ -1145,6 +1223,40 @@
             document.getElementById('panelGmail').style.display = mode === 'gmail' ? 'block' : 'none';
             document.getElementById('panelOutlook').style.display = mode === 'outlook' ? 'block' : 'none';
             document.getElementById('panelSmtp').style.display = mode === 'smtp' ? 'block' : 'none';
+        }
+        // Single source of truth for switching the send-method segment.
+        // IMPORTANT: this only flips the active segment + visible panel.
+        // It never touches recipient fields (To / CC / BCC) or the message
+        // body, so swapping between Gmail <-> Outlook preserves everything
+        // the user has already typed.
+        function selectSendSegment(mode) {
+            const sg = document.getElementById('segGmail');
+            const so = document.getElementById('segOutlook');
+            const ss = document.getElementById('segSmtp');
+            if (sg) sg.classList.toggle('active', mode === 'gmail');
+            if (so) so.classList.toggle('active', mode === 'outlook');
+            if (ss) ss.classList.toggle('active', mode === 'smtp');
+            setSendMethodPanel(mode);
+            updateSendingAsBadge();
+        }
+        // Decide the initial default send method based on which OAuth
+        // providers are already connected. Rules:
+        //   - Outlook + Gmail both connected -> Outlook wins.
+        //   - Only one OAuth provider connected -> that one is default.
+        //   - Neither connected -> fall back to SMTP (password).
+        // Runs at most once per page load, and is skipped entirely if the
+        // user has already manually clicked a segment.
+        function applyInitialSendMethod() {
+            if (_initialSendMethodApplied || _userPickedSendMethod) return;
+            const s = _lastAuthStatus || {};
+            let defaultMode = 'smtp';
+            if (s.outlook_connected) {
+                defaultMode = 'outlook';
+            } else if (s.gmail_connected) {
+                defaultMode = 'gmail';
+            }
+            selectSendSegment(defaultMode);
+            _initialSendMethodApplied = true;
         }
         function updateSegmentChecks() {
             const s = _lastAuthStatus || {};
@@ -1194,6 +1306,7 @@
                 .then(s => {
                     _lastAuthStatus = s || {};
                     updateSegmentChecks();
+                    applyInitialSendMethod();
                     updateSendingAsBadge();
                     const gH = document.getElementById('gmailConfigHint');
                     const oH = document.getElementById('outlookConfigHint');
@@ -1275,7 +1388,9 @@
                         sfLink.style.opacity = '1';
                     }
                 })
-                .catch(function() {});
+                .catch(function() {
+                    applyInitialSendMethod();
+                });
         }
         document.getElementById('btnDisconnectGmail').addEventListener('click', function() {
             fetch('/api/auth/disconnect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: 'gmail' }) })
@@ -1351,25 +1466,16 @@
             document.getElementById('btnSfLoadOrg').disabled = false;
         });
         document.getElementById('segGmail').addEventListener('click', function() {
-            document.getElementById('segGmail').classList.add('active');
-            document.getElementById('segOutlook').classList.remove('active');
-            document.getElementById('segSmtp').classList.remove('active');
-            setSendMethodPanel('gmail');
-            updateSendingAsBadge();
+            _userPickedSendMethod = true;
+            selectSendSegment('gmail');
         });
         document.getElementById('segOutlook').addEventListener('click', function() {
-            document.getElementById('segOutlook').classList.add('active');
-            document.getElementById('segGmail').classList.remove('active');
-            document.getElementById('segSmtp').classList.remove('active');
-            setSendMethodPanel('outlook');
-            updateSendingAsBadge();
+            _userPickedSendMethod = true;
+            selectSendSegment('outlook');
         });
         document.getElementById('segSmtp').addEventListener('click', function() {
-            document.getElementById('segSmtp').classList.add('active');
-            document.getElementById('segGmail').classList.remove('active');
-            document.getElementById('segOutlook').classList.remove('active');
-            setSendMethodPanel('smtp');
-            updateSendingAsBadge();
+            _userPickedSendMethod = true;
+            selectSendSegment('smtp');
         });
         (function() {
             const senderEl = document.getElementById('sender_email');

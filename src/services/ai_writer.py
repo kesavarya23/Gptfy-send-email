@@ -625,12 +625,18 @@ def compose_email(
 REPLY_INTENTS = {
     "interested": "Interested",
     "asking": "Asking for details",
+    "acknowledgement": "Acknowledgement",
+    "thanks": "Thanks note",
     "decline": "Polite decline",
     "forwarding": "Forwarding internally",
     "ooo": "Out of office",
     "negotiation": "Negotiation",
     "quick_yes": "Quick yes",
     "question": "Question on a fact",
+    # The "other" intent is a passthrough: the caller supplies the body
+    # directly via /api/get_reply (custom_body) and the AI is bypassed.
+    # Listed here so server-side label lookups still resolve.
+    "other": "Other (custom)",
 }
 
 _REPLY_FALLBACK_BODIES = {
@@ -641,6 +647,14 @@ _REPLY_FALLBACK_BODIES = {
     "asking": (
         "Appreciate the note. Before we go further, could you send pricing tiers, "
         "any security/IT documentation, and one customer reference in our space?"
+    ),
+    "acknowledgement": (
+        "Got it — noted on {subject_snip}. I'll review on my side and circle back "
+        "if anything stands out."
+    ),
+    "thanks": (
+        "Thanks for sending this through on {subject_snip} — appreciate you "
+        "taking the time. I'll keep it on my radar."
     ),
     "decline": (
         "Thanks for the message. We're set with our current vendor for now and "
@@ -666,6 +680,10 @@ _REPLY_FALLBACK_BODIES = {
     "question": (
         "Quick clarification on {subject_snip}: what does that actually include? "
         "We've been burned before on scope assumptions, so worth being specific up front."
+    ),
+    "other": (
+        "Thanks for the note on {subject_snip} — I'll come back to you with a "
+        "fuller response shortly."
     ),
 }
 

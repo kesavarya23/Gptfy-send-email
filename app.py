@@ -1928,9 +1928,16 @@ def get_reply_endpoint():
     intent_key = (body.get("intent") or "asking").lower().strip()
     tone_hint = (body.get("tone_hint") or "").strip()
     parent_reply_id = (body.get("parent_reply_id") or "").strip() or None
+    custom_body = (body.get("custom_body") or "").strip()
 
     if not (send_id and replier_email):
         return jsonify({"success": False, "error": "send_id and replier_email are required"}), 400
+
+    if intent_key == "other" and not custom_body:
+        return jsonify({
+            "success": False,
+            "error": "Type your reply text in the box before sending the 'Other' intent.",
+        }), 400
 
     send_row = repdb.get_send(send_id)
     if not send_row:
@@ -2021,16 +2028,26 @@ def get_reply_endpoint():
         original_sender_email = send_row.get("sender_email") or ""
         in_reply_to_id = send_row.get("message_id") or ""
 
-    composed = ai_compose_reply(
-        original_subject=original_subject,
-        original_body_plain=original_body,
-        original_sender_email=original_sender_email,
-        replier_email=replier_email,
-        replier_name=replier_display_name,
-        intent=intent_key,
-        mode=mode,
-        tone_hint=tone_hint,
-    )
+    if intent_key == "other":
+        # User typed the reply themselves — bypass the AI entirely and use
+        # the supplied text as the reply body verbatim. We still record the
+        # reply in the same shape downstream code expects.
+        composed = {
+            "body": custom_body[:4000],
+            "intent": "Other (custom)",
+            "source": "user",
+        }
+    else:
+        composed = ai_compose_reply(
+            original_subject=original_subject,
+            original_body_plain=original_body,
+            original_sender_email=original_sender_email,
+            replier_email=replier_email,
+            replier_name=replier_display_name,
+            intent=intent_key,
+            mode=mode,
+            tone_hint=tone_hint,
+        )
     reply_body = composed.get("body") or ""
     reply_subject = original_subject if original_subject.lower().startswith("re:") else f"Re: {original_subject}"
 
