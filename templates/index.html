@@ -1537,9 +1537,9 @@
             document.getElementById('customTopics').classList.add('show');
         });
 
-        // Vercel serverless functions cap at ~300s (Pro). Split large batches so each
-        // /send_emails call finishes well inside that limit.
-        var VERCEL_BATCH_SECONDS = 240;
+        // Vercel serverless functions cap at ~60–300s depending on plan. Split
+        // large batches so each /send_emails call finishes inside that limit.
+        var VERCEL_BATCH_SECONDS = 50;
 
         function estimateSecondsPerEmail(delaySeconds) {
             return 35 + (delaySeconds || 0);
