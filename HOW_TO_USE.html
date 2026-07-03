@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>How to Use - Salesforce Email Sender</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+            color: #2d3748;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .hero {
+            background: linear-gradient(135deg, #e8ecff 0%, #f3e8ff 100%);
+            color: #1a202c;
+            padding: 50px 40px;
+            text-align: center;
+            border-bottom: 4px solid #667eea;
+        }
+
+        .hero h1 {
+            font-size: 36px;
+            margin-bottom: 12px;
+            font-weight: 700;
+            color: #1a202c;
+        }
+
+        .hero p {
+            font-size: 16px;
+            color: #2d3748;
+            max-width: 650px;
+            margin: 0 auto;
+        }
+
+        .content {
+            padding: 40px;
+        }
+
+        h2 {
+            color: #667eea;
+            font-size: 24px;
+            margin: 40px 0 20px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #667eea;
+        }
+
+        h2:first-child {
+            margin-top: 0;
+        }
+
+        h3 {
+            color: #2d3748;
+            font-size: 18px;
+            margin: 24px 0 10px 0;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .step-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 50%;
+            font-size: 15px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        p {
+            margin-bottom: 12px;
+            color: #4a5568;
+        }
+
+        ul, ol {
+            margin: 12px 0 12px 24px;
+            color: #4a5568;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        strong {
+            color: #2d3748;
+        }
+
+        code {
+            background: #f1f3ff;
+            color: #5a67d8;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+        }
+
+        .layout-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 24px 0;
+        }
+
+        .layout-card {
+            background: #fafbff;
+            border: 2px solid #e2e8ff;
+            border-radius: 12px;
+            padding: 24px;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .layout-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.15);
+        }
+
+        .layout-card h4 {
+            color: #667eea;
+            font-size: 16px;
+            margin-bottom: 14px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .layout-card ul {
+            margin: 0;
+            list-style: none;
+            padding: 0;
+        }
+
+        .layout-card li {
+            padding: 8px 0;
+            border-bottom: 1px dashed #d0d4e3;
+            color: #4a5568;
+            font-size: 14px;
+        }
+
+        .layout-card li:last-child {
+            border-bottom: none;
+        }
+
+        .layout-card li::before {
+            content: "→ ";
+            color: #667eea;
+            font-weight: 700;
+        }
+
+        .step-card {
+            background: #fafbff;
+            border-left: 4px solid #667eea;
+            border-radius: 8px;
+            padding: 20px 24px;
+            margin: 20px 0;
+        }
+
+        .tip-box {
+            background: linear-gradient(135deg, #e8f5e9 0%, #f1f8e9 100%);
+            border-left: 4px solid #43a047;
+            padding: 14px 18px;
+            border-radius: 8px;
+            margin: 16px 0;
+            color: #2e7d32;
+            font-size: 14px;
+        }
+
+        .tip-box strong {
+            color: #1b5e20;
+        }
+
+        .quote-box {
+            background: #f7fafc;
+            border-left: 4px solid #cbd5e0;
+            padding: 12px 18px;
+            border-radius: 6px;
+            margin: 12px 0;
+            font-style: italic;
+            color: #4a5568;
+            font-size: 14px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 16px 0;
+            background: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        th {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 14px 18px;
+            text-align: left;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        td {
+            padding: 14px 18px;
+            border-bottom: 1px solid #e2e8f0;
+            color: #4a5568;
+            font-size: 14px;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:nth-child(even) td {
+            background: #fafbff;
+        }
+
+        .summary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .summary h2 {
+            color: white;
+            border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+            margin-top: 0;
+        }
+
+        .summary p {
+            color: white;
+            font-size: 15px;
+        }
+
+        .flow-arrow {
+            font-weight: 700;
+            color: #ffeb3b;
+            margin: 0 6px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+
+        .badge-required {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+
+        .badge-optional {
+            background: #dbeafe;
+            color: #2563eb;
+        }
+
+        hr {
+            border: none;
+            border-top: 1px dashed #cbd5e0;
+            margin: 32px 0;
+        }
+
+        @media (max-width: 700px) {
+            .hero {
+                padding: 32px 20px;
+            }
+
+            .hero h1 {
+                font-size: 26px;
+            }
+
+            .content {
+                padding: 24px;
+            }
+
+            .layout-grid {
+                grid-template-columns: 1fr;
+            }
+
+            table {
+                font-size: 13px;
+            }
+
+            th, td {
+                padding: 10px 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+
+        <div class="hero">
+            <h1>How to Use This App</h1>
+            <p>A simple AI-powered email sender. You connect your inbox (Gmail / Outlook), optionally pull data from Salesforce, fill in who to email and how many — and the app writes and sends the emails for you.</p>
+        </div>
+
+        <div class="content">
+
+            <h2>The screen at a glance</h2>
+            <p>When you open the app, you'll see <strong>two columns</strong> side by side:</p>
+
+            <div class="layout-grid">
+                <div class="layout-card">
+                    <h4>Left side — Setup &amp; Connections</h4>
+                    <ul>
+                        <li>Connect your sending email account</li>
+                        <li>(Optional) Connect Salesforce + load an account</li>
+                        <li>(Optional) Connect "reply mailboxes" for testing</li>
+                    </ul>
+                </div>
+                <div class="layout-card">
+                    <h4>Right side — Compose &amp; Send</h4>
+                    <ul>
+                        <li>Type recipients (To / CC / BCC)</li>
+                        <li>Choose how many emails to send</li>
+                        <li>Pick topic style (Default / Custom)</li>
+                        <li>Set delay between emails and click <strong>Send Emails</strong></li>
+                    </ul>
+                </div>
+            </div>
+
+            <p>Below the form (right column) you'll see the <strong>Results panel</strong> after you send — it shows how many succeeded and lists each email with a <strong>Get reply</strong> button for testing.</p>
+
+            <hr>
+
+            <h2>Step-by-step</h2>
+
+            <div class="step-card">
+                <h3><span class="step-number">1</span> Open the app</h3>
+                <p>Open the app in your browser: <a href="https://gptfy-send-email.vercel.app/" target="_blank" rel="noopener" style="color: #667eea; font-weight: 600; text-decoration: none; border-bottom: 2px solid #667eea;">https://gptfy-send-email.vercel.app/</a></p>
+            </div>
+
+            <div class="step-card">
+                <h3><span class="step-number">2</span> Set up your sender <span class="badge badge-required">Required</span></h3>
+                <p>In the left column under <strong>Sender Information</strong>, pick <strong>one</strong> sending method using the toggle at the top:</p>
+                <ul>
+                    <li><strong>Gmail (OAuth)</strong> → click <strong>Connect Google</strong> → sign in with the Google account you want to send from. A green ✓ appears once connected.</li>
+                    <li><strong>Outlook (OAuth)</strong> → click <strong>Connect Microsoft</strong> → sign in with your Microsoft / work account.</li>
+                    <li><strong>SMTP (password)</strong> → type your sender email, <strong>app password</strong>, and your name. Use this only if you can't use OAuth.</li>
+                </ul>
+                <div class="tip-box">
+                    <strong>Tip:</strong> OAuth (Gmail / Outlook) is easier and safer — you don't need to create app passwords.
+                </div>
+            </div>
+
+            <div class="step-card">
+                <h3><span class="step-number">3</span> Connect Salesforce <span class="badge badge-optional">Optional</span></h3>
+                <p>Only needed if you want emails written from real CRM data. Look for the <strong>Salesforce context</strong> section on the left:</p>
+                <ol>
+                    <li>Click <strong>Connect Salesforce</strong> and log into your org.</li>
+                    <li>In the <strong>Account name</strong> box, type your account (e.g. <em>Acme Corp</em>) and click <strong>Load from org</strong>.</li>
+                    <li>The app pulls that account's opportunities and stores them for the AI to use.</li>
+                </ol>
+                <p>If you don't want to use Salesforce, skip this section — the app will generate sample emails on its own.</p>
+                <div class="tip-box">
+                    <strong>Want to give the AI extra context?</strong> Use the <strong>Opportunity details (text)</strong> box to paste anything you want the AI to know about — stage, amount, contacts, next steps, or even a custom instruction like:
+                    <div class="quote-box" style="margin-top: 10px; background: white;">
+                        "Mention that our pricing is locked for 30 days and ask them to confirm by Friday."
+                    </div>
+                    You can also <strong>upload a file or screenshot</strong> (PDF, image, .txt) in the same panel — the app reads it and feeds the content to the AI.
+                </div>
+            </div>
+
+            <div class="step-card">
+                <h3><span class="step-number">4</span> Add recipients <span class="badge badge-required">Required</span></h3>
+                <p>In the right column under <strong>Recipients</strong>:</p>
+                <ul>
+                    <li><strong>To</strong> — at least one email is required. Separate multiple with commas, semicolons, or new lines.</li>
+                    <li><strong>CC / BCC</strong> — optional, same format.</li>
+                </ul>
+            </div>
+
+            <div class="step-card">
+                <h3><span class="step-number">5</span> Choose how many emails</h3>
+                <p>In the right column under <strong>Email Configuration</strong>:</p>
+                <ul>
+                    <li><strong>No. of emails to send</strong> — type a number (e.g. <code>3</code>).</li>
+                    <li><strong>Topic selection</strong>:
+                        <ul>
+                            <li><strong>Default</strong> → the AI picks varied topics automatically (recommended for first-time users).</li>
+                            <li><strong>Custom</strong> → you tick the topics you want: <em>Meeting Invitation, Follow-up, Thank You, Project Update, Reminder, Product Queries, Demo Enquiry,</em> etc.</li>
+                        </ul>
+                    </li>
+                    <li><strong>Email Delay</strong> — seconds between each email (set <code>0</code> to send all at once, or <code>5–10</code> to space them out and avoid spam filters).</li>
+                </ul>
+            </div>
+
+            <div class="step-card">
+                <h3><span class="step-number">6</span> Click <strong>Send Emails</strong></h3>
+                <p>The button at the bottom of the right column runs everything:</p>
+                <ol>
+                    <li>The AI writes each email using your Salesforce + custom-message context.</li>
+                    <li>Each email is sent through your connected Gmail / Outlook / SMTP account.</li>
+                    <li>A <strong>Results</strong> panel appears below with <strong>Total Sent</strong>, <strong>Failed</strong>, and <strong>Success Rate</strong>, plus one row per email.</li>
+                </ol>
+                <div class="tip-box">
+                    <strong>Verify:</strong> Open your <strong>Sent</strong> folder to confirm the emails actually went out.
+                </div>
+            </div>
+
+            <div class="step-card">
+                <h3><span class="step-number">7</span> Test replies <span class="badge badge-optional">Optional — for testing</span></h3>
+                <p>This is for QA / demo purposes only:</p>
+                <ol>
+                    <li>Go to the <strong>Reply mailboxes</strong> panel on the left and connect a second test inbox (e.g. a Gmail account belonging to a fake "customer").</li>
+                    <li>After sending, click <strong>Get reply</strong> next to any email in the Results panel.</li>
+                    <li>The app simulates that contact replying to you (<em>interested / asking / declining / custom</em>), so you can see the full conversation thread without manually logging into the test inbox.</li>
+                </ol>
+            </div>
+
+            <hr>
+
+            <h2>Quick troubleshooting</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Problem</th>
+                        <th>What to do</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>"Please connect Google / Microsoft first"</td>
+                        <td>Go back to the <strong>Sender</strong> panel and click the connect button.</td>
+                    </tr>
+                    <tr>
+                        <td>"Custom Salesforce context is on but no content was found"</td>
+                        <td>Either type/upload some context, or untick the Salesforce <strong>"Use this context"</strong> option.</td>
+                    </tr>
+                    <tr>
+                        <td>Email shows <strong>Failed</strong> in red</td>
+                        <td>Hover the row to see the error. Most common: wrong app password, expired OAuth (reconnect), or invalid recipient address.</td>
+                    </tr>
+                    <tr>
+                        <td>Want to start over</td>
+                        <td>Click <strong>Disconnect</strong> next to any connection to remove it, or refresh the page.</td>
+                    </tr>
+                </tbody>
+            </table>
+
+        </div>
+    </div>
+</body>
+</html>

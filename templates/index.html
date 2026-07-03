@@ -820,7 +820,7 @@
 
                 <div class="loading" id="loading">
                     <div class="spinner"></div>
-                    <p>Generating and sending emails...</p>
+                    <p id="loadingStatus">Generating and sending emails...</p>
                 </div>
 
                 <div class="error-message" id="errorMessage"></div>
@@ -1537,6 +1537,92 @@
             document.getElementById('customTopics').classList.add('show');
         });
 
+        // Vercel serverless functions cap at ~300s (Pro). Split large batches so each
+        // /send_emails call finishes well inside that limit.
+        var VERCEL_BATCH_SECONDS = 240;
+
+        function estimateSecondsPerEmail(delaySeconds) {
+            return 35 + (delaySeconds || 0);
+        }
+
+        function computeChunkSize(totalEmails, delaySeconds) {
+            if (totalEmails <= 1) return totalEmails;
+            var perEmail = estimateSecondsPerEmail(delaySeconds);
+            var size = Math.max(1, Math.floor(VERCEL_BATCH_SECONDS / perEmail));
+            return Math.min(size, totalEmails);
+        }
+
+        async function parseSendResponse(response) {
+            var text = await response.text();
+            var result;
+            try {
+                result = JSON.parse(text);
+            } catch (parseErr) {
+                if (response.status === 504 || /^An error/i.test(text)) {
+                    throw new Error(
+                        'Server timed out (Vercel limit). The app will retry in smaller batches automatically; ' +
+                        'if this persists, lower the email delay or send fewer emails at once.'
+                    );
+                }
+                throw new Error('Unexpected server response: ' + text.slice(0, 160));
+            }
+            if (!response.ok && !result.error) {
+                result.error = 'HTTP ' + response.status;
+            }
+            return result;
+        }
+
+        function buildSendFormData(opts) {
+            var formData = new FormData();
+            formData.append('send_method', opts.sendMethod);
+            formData.append('sender_email', document.getElementById('sender_email').value);
+            formData.append('sender_password', document.getElementById('sender_password').value);
+            formData.append('sender_name', document.getElementById('sender_name').value);
+            formData.append('to_emails', document.getElementById('to_emails').value);
+            formData.append('cc_emails', document.getElementById('cc_emails').value);
+            formData.append('bcc_emails', document.getElementById('bcc_emails').value);
+            formData.append('num_business', String(opts.numBusiness));
+            formData.append('num_opportunities', '0');
+            formData.append('num_cases', '0');
+            formData.append('delay_seconds', String(opts.delaySeconds));
+            formData.append('topic_mode', opts.topicMode);
+            opts.selectedTopics.forEach(function (t) { formData.append('selected_topics', t); });
+            formData.append('use_custom_context', opts.useSf ? 'true' : 'false');
+            formData.append('include_account', opts.includeAccount ? 'true' : 'false');
+            formData.append('include_opportunity', opts.includeOpportunity ? 'true' : 'false');
+            formData.append('account_name', opts.includeAccount ? document.getElementById('sfAccount').value : '');
+            formData.append('opportunity_text', opts.includeOpportunity ? document.getElementById('sfOppText').value : '');
+            if (opts.upFile && opts.includeOpportunity) {
+                formData.append('opportunity_file', opts.upFile);
+            }
+            return formData;
+        }
+
+        function showSendResults(allEmails, totalRequested) {
+            var sent = allEmails.filter(function (e) { return e.status === 'Sent'; }).length;
+            var failed = allEmails.length - sent;
+            var rate = allEmails.length
+                ? Math.round((sent / allEmails.length) * 1000) / 10
+                : 0;
+
+            document.getElementById('successMessage').textContent =
+                '✓ Successfully sent ' + sent + ' out of ' + totalRequested + ' emails!' +
+                (failed ? ' (' + failed + ' failed)' : '');
+            document.getElementById('successMessage').classList.add('show');
+
+            document.getElementById('totalSent').textContent = sent;
+            document.getElementById('totalFailed').textContent = failed;
+            document.getElementById('successRate').textContent = rate + '%';
+
+            var emailList = document.getElementById('emailList');
+            emailList.innerHTML = '';
+            allEmails.forEach(function (email, idx) {
+                emailList.appendChild(renderEmailResult(email, idx));
+            });
+            refreshReplyMailboxesList();
+            document.getElementById('results').classList.add('show');
+        }
+
         document.getElementById('emailForm').addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -1586,89 +1672,80 @@
                 }
             }
 
-            // Show loading
-            document.getElementById('loading').style.display = 'block';
-            document.getElementById('submitBtn').disabled = true;
-
-            const formData = new FormData();
-            formData.append('send_method', getSendMethod());
-            formData.append('sender_email', document.getElementById('sender_email').value);
-            formData.append('sender_password', document.getElementById('sender_password').value);
-            formData.append('sender_name', document.getElementById('sender_name').value);
-            formData.append('to_emails', document.getElementById('to_emails').value);
-            formData.append('cc_emails', document.getElementById('cc_emails').value);
-            formData.append('bcc_emails', document.getElementById('bcc_emails').value);
-            formData.append('num_business', String(numBiz));
-            formData.append('num_opportunities', '0');
-            formData.append('num_cases', '0');
-            formData.append('delay_seconds', String(parseInt(document.getElementById('delay_seconds').value) || 0));
-            formData.append('topic_mode', topicMode);
-            if (topicMode === 'custom') {
-                selectedTopics.forEach(function (t) { formData.append('selected_topics', t); });
-            }
-            formData.append('use_custom_context', useSf ? 'true' : 'false');
+            const delaySeconds = parseInt(document.getElementById('delay_seconds').value) || 0;
             const incAccountEl = document.getElementById('includeAccount');
             const incOppEl = document.getElementById('includeOpportunity');
             const includeAccount = incAccountEl ? incAccountEl.checked : true;
             const includeOpportunity = incOppEl ? incOppEl.checked : true;
-            formData.append('include_account', includeAccount ? 'true' : 'false');
-            formData.append('include_opportunity', includeOpportunity ? 'true' : 'false');
-            formData.append('account_name', includeAccount ? document.getElementById('sfAccount').value : '');
-            formData.append('opportunity_text', includeOpportunity ? document.getElementById('sfOppText').value : '');
             const upFile = document.getElementById('sfOppFile').files[0];
-            if (upFile && includeOpportunity) {
-                formData.append('opportunity_file', upFile);
-            }
+
+            const chunkSize = computeChunkSize(numBiz, delaySeconds);
+            const totalChunks = Math.ceil(numBiz / chunkSize);
+
+            const loadingEl = document.getElementById('loading');
+            const loadingStatus = document.getElementById('loadingStatus');
+            loadingEl.style.display = 'block';
+            document.getElementById('submitBtn').disabled = true;
+
+            const allEmails = [];
+            var completed = 0;
 
             try {
-                const response = await fetch('/send_emails', {
-                    method: 'POST',
-                    body: formData
-                });
+                for (var chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                    var remaining = numBiz - completed;
+                    var thisChunk = Math.min(chunkSize, remaining);
+                    var chunkNum = chunkIndex + 1;
 
-                const result = await response.json();
+                    loadingStatus.textContent =
+                        'Generating and sending emails… ' + completed + ' of ' + numBiz +
+                        ' done' +
+                        (totalChunks > 1 ? ' (batch ' + chunkNum + ' of ' + totalChunks + ')' : '') +
+                        '.';
 
-                // Hide loading
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('submitBtn').disabled = false;
-
-                if (result.success) {
-                    // Show success message
-                    document.getElementById('successMessage').textContent =
-                        `✓ Successfully sent ${result.summary.sent} out of ${result.summary.total} emails!`;
-                    document.getElementById('successMessage').classList.add('show');
-
-                    // Show results
-                    document.getElementById('totalSent').textContent = result.summary.sent;
-                    document.getElementById('totalFailed').textContent = result.summary.failed;
-                    document.getElementById('successRate').textContent = result.summary.success_rate + '%';
-
-                    // Show email list
-                    const emailList = document.getElementById('emailList');
-                    emailList.innerHTML = '';
-
-                    result.emails.forEach((email, idx) => {
-                        emailList.appendChild(renderEmailResult(email, idx));
+                    var formData = buildSendFormData({
+                        sendMethod: sm,
+                        numBusiness: thisChunk,
+                        delaySeconds: delaySeconds,
+                        topicMode: topicMode,
+                        selectedTopics: selectedTopics,
+                        useSf: useSf,
+                        includeAccount: includeAccount,
+                        includeOpportunity: includeOpportunity,
+                        upFile: upFile,
                     });
-                    refreshReplyMailboxesList();
 
-                    document.getElementById('results').classList.add('show');
+                    var response = await fetch('/send_emails', {
+                        method: 'POST',
+                        body: formData,
+                    });
 
-                } else {
-                    // Show error
-                    document.getElementById('errorMessage').textContent =
-                        `✗ Error: ${result.error}`;
-                    document.getElementById('errorMessage').classList.add('show');
+                    var result = await parseSendResponse(response);
+
+                    if (!result.success) {
+                        throw new Error(result.error || 'Send failed on batch ' + chunkNum);
+                    }
+
+                    if (result.emails && result.emails.length) {
+                        allEmails.push.apply(allEmails, result.emails);
+                    }
+                    completed += thisChunk;
                 }
 
+                loadingEl.style.display = 'none';
+                document.getElementById('submitBtn').disabled = false;
+                showSendResults(allEmails, numBiz);
+
             } catch (error) {
-                // Hide loading
-                document.getElementById('loading').style.display = 'none';
+                loadingEl.style.display = 'none';
                 document.getElementById('submitBtn').disabled = false;
 
-                // Show error
-                document.getElementById('errorMessage').textContent =
-                    `✗ Error: ${error.message}`;
+                if (allEmails.length > 0) {
+                    showSendResults(allEmails, numBiz);
+                    document.getElementById('errorMessage').textContent =
+                        '✗ Stopped after ' + allEmails.length + ' of ' + numBiz + ' emails: ' + error.message;
+                } else {
+                    document.getElementById('errorMessage').textContent = '✗ Error: ' + error.message;
+                }
                 document.getElementById('errorMessage').classList.add('show');
             }
         });
